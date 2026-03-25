@@ -27,7 +27,7 @@
             <p><strong>ConfiguraciÃ³n de Inteligencia</strong><br>Origen: <strong id="showOrigin"></strong></p>
             
             <label class="config-label">Google OAuth Client ID</label>
-            <input type="text" id="clientIdInput" placeholder="XXXXXXXXXXXX.apps.googleusercontent.com">
+            <input type="text" id="clientIdInput" placeholder="TU-CLIENT-ID.apps.googleusercontent.com">
             
             <div class="config-actions">
                 <button class="btn-save" onclick="saveConfigs()">Guardar Todo</button>
@@ -88,6 +88,7 @@
             <h2 style="font-size:0.9rem; font-weight:700; color:var(--text-dim); margin-bottom:0; display:flex; align-items:center;">
                 RESULTADOS 
                 <span id="liveStatus" class="live-dot" style="display:none; width:8px; height:8px; border-radius:50%; background:var(--green); margin-left:10px;"></span>
+                <span id="resultsMaxInfo" style="margin-left:10px; font-size:0.66rem; color:var(--text-muted); font-weight:600;">MAX: 10</span>
             </h2>
             <div class="max-control max-control-results">
                 <label for="maxResultsInput" class="max-label">MAX</label>

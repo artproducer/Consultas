@@ -4,7 +4,7 @@
  */
 
 // ─── CONFIGURATION ───────────────────────────────────────────────────────────
-const HARDCODED_CLIENT_ID = 'TU-CLIENT-ID.apps.googleusercontent.com'; // Pre-filled placeholder
+const HARDCODED_CLIENT_ID = ''; // Use placeholder in UI instead of pre-filling value
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email';
 const SK_CID = 'query_client_id';
 const SK_ACCESS = 'query_access_token';
@@ -22,7 +22,7 @@ let defaultAuthBtnHtml = '';
 let resultsContainer, loader, submitBtn, filterInput, authBtn, authText, banner, clientIdInput, backToTopBtn, clearFilterBtn;
 
 // ─── AUTHENTICATION (GIS) ────────────────────────────────────────────────────
-function getSavedClientId() { return localStorage.getItem(SK_CID) || HARDCODED_CLIENT_ID; }
+function getSavedClientId() { return localStorage.getItem(SK_CID) || ''; }
 function getClientId() { return getSavedClientId(); }
 
 function initTokenClient() {
@@ -154,10 +154,11 @@ async function searchMails(isSilent = false) {
 
     try {
         const maxLimit = document.getElementById('maxResultsInput').value || 10;
-        const query = encodeURIComponent(`${filter} newer_than:15d`);
+        const query = encodeURIComponent(`${filter}`);
         const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=${maxLimit}`, {
             headers: { 'Authorization': 'Bearer ' + accessToken }
         });
+        updateResultsMaxInfo(maxLimit);
 
         if (listRes.status === 401) { logout(); throw new Error('Sesión expirada. Por favor reconecta.'); }
         if (!listRes.ok) throw new Error('Error buscando correos');
@@ -563,6 +564,12 @@ function updateBackToTopVisibility() {
     backToTopBtn.classList.toggle('show', shouldShow);
 }
 
+function updateResultsMaxInfo(maxValue) {
+    const info = document.getElementById('resultsMaxInfo');
+    if (!info) return;
+    info.textContent = `MAX: ${maxValue}`;
+}
+
 // Manual extractor based on keywords
 function findMainAction(content, isHtml) {
     const rules = [
@@ -668,6 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clientIdInput = document.getElementById('clientIdInput');
     backToTopBtn = document.getElementById('backToTopBtn');
     clearFilterBtn = document.getElementById('clearFilterBtn');
+    const maxResultsInput = document.getElementById('maxResultsInput');
 
     document.getElementById('showOrigin').textContent = location.origin;
     clientIdInput.value = getSavedClientId();
@@ -689,6 +697,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (filterInput && clearFilterBtn) {
         filterInput.addEventListener('input', updateClearFilterVisibility);
         updateClearFilterVisibility();
+    }
+    if (maxResultsInput) {
+        maxResultsInput.addEventListener('input', () => updateResultsMaxInfo(maxResultsInput.value || 10));
+        updateResultsMaxInfo(maxResultsInput.value || 10);
     }
     window.addEventListener('scroll', updateBackToTopVisibility, { passive: true });
     updateBackToTopVisibility();
