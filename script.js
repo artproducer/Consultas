@@ -13,6 +13,8 @@ const SK_EXPIRY = 'query_token_expiry';
 let accessToken = null;
 let tokenClient = null;
 let isSearching = false;
+let pollingInterval = null;
+let renderedMessageIds = new Set();
 
 // DOM Cache
 let resultsContainer, loader, submitBtn, filterInput, authBtn, authText, banner, clientIdInput;
@@ -89,30 +91,36 @@ function isTokenValid() {
 
 // ─── SEARCH & RENDER ─────────────────────────────────────────────────────────
 
-async function searchMails() {
+async function searchMails(isSilent = false) {
     if (isSearching) return;
 
-    // Ensure session
     if (!accessToken && isTokenValid()) {
         accessToken = localStorage.getItem(SK_ACCESS);
         onAuthed();
     }
 
     if (!accessToken) {
-        showToast('Conecta con Google primero', 'error');
-        startAuth();
+        if (!isSilent) {
+            showToast('Conecta con Google primero', 'error');
+            startAuth();
+        }
         return;
     }
 
     const filter = filterInput.value.trim();
     if (!filter) return;
 
-    setLoading(true);
-    resultsContainer.innerHTML = '';
+    if (!isSilent) {
+        if (pollingInterval) clearInterval(pollingInterval);
+        setLoading(true);
+        resultsContainer.innerHTML = '';
+        renderedMessageIds.clear();
+        document.getElementById('liveStatus').style.display = 'none';
+    }
 
     try {
         const query = encodeURIComponent(`${filter} newer_than:15d`);
-        const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=30`, {
+        const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=10`, {
             headers: { 'Authorization': 'Bearer ' + accessToken }
         });
 
@@ -122,32 +130,47 @@ async function searchMails() {
         const listData = await listRes.json();
 
         if (!listData.messages || listData.messages.length === 0) {
-            resultsContainer.innerHTML = `
-                <div style="text-align:center; padding:40px; border-radius:18px; border:1px dashed var(--border);">
-                    <div style="font-size:0.9rem; font-weight:600; color:var(--text); margin-bottom:8px;">No se encontraron resultados</div>
-                    <div style="font-size:0.75rem; color:var(--text-dim); line-height:1.4;">
-                        No hay correos que coincidan con <strong>${filter}</strong>. Prueba con otro término.
+            if (!isSilent) {
+                resultsContainer.innerHTML = `
+                    <div style="text-align:center; padding:40px; border-radius:18px; border:1px dashed var(--border);">
+                        <div style="font-size:0.9rem; font-weight:600; color:var(--text); margin-bottom:8px;">No se encontraron resultados</div>
                     </div>
-                </div>`;
+                `;
+            }
             return;
         }
 
-        for (const msg of listData.messages) {
+        // We reverse to keep chronological order when prepending
+        const newBatch = listData.messages.filter(m => !renderedMessageIds.has(m.id)).reverse();
+
+        for (const msg of newBatch) {
             const detailRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`, {
                 headers: { 'Authorization': 'Bearer ' + accessToken }
             });
             const data = await detailRes.json();
-            renderEmail(data);
+            renderedMessageIds.add(msg.id);
+            renderEmail(data, true);
         }
 
     } catch (err) {
-        showToast(err.message, 'error');
+        if (!isSilent) showToast(err.message, 'error');
     } finally {
         setLoading(false);
+        if (!isSilent) startPolling();
     }
 }
 
-function renderEmail(msg) {
+function startPolling() {
+    if (pollingInterval) clearInterval(pollingInterval);
+    const live = document.getElementById('liveStatus');
+    if (live) live.style.display = 'inline-flex';
+    pollingInterval = setInterval(() => {
+        const filter = filterInput.value.trim();
+        if (filter && !isSearching) searchMails(true);
+    }, 2000);
+}
+
+function renderEmail(msg, prepend = false) {
     const headers = msg.payload.headers;
     const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(Sin asunto)';
     const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
@@ -179,12 +202,17 @@ function renderEmail(msg) {
         if (/^(202[4-9]|2030)$/.test(c)) return true; // Common years
         if (/^[0-9]{5}$/.test(c)) return true; // ZIP codes
         if (/^(.)\1+$/.test(c)) return true; // Repeated digits (0000)
-        if (c.includes('1570') || c.startsWith('01800')) return true; // Netflix/Support phone fragments
+        if (c.includes('1570') || c.startsWith('01800')) return true; // Phone fragments
 
         // Use raw (spaced) version if provided to find correct position in context
         const searchStr = raw || c;
         const pos = context.indexOf(searchStr);
         if (pos === -1) return false;
+
+        // Anti-Tracking/SRC ID check: if number is surrounded by hyphens or hex-like chars
+        const surrounding = context.substring(Math.max(0, pos - 15), Math.min(context.length, pos + searchStr.length + 15));
+        if (/[0-9a-fA-F]{4,}[-_]|[-_][0-9a-fA-F]{4,}/.test(surrounding)) return true; // e.g., 1234-ABCD, ABCD-1234
+        if (surrounding.includes('SRC:') || surrounding.includes('ID:') || /src/i.test(surrounding) || surrounding.includes('UUID')) return true; // e.g., SRC:1234, ID:5678, UUID-9012
 
         const lookbehind = context.substring(Math.max(0, pos - 50), pos).toLowerCase();
         const lookahead = context.substring(pos + searchStr.length, Math.min(context.length, pos + searchStr.length + 30)).toLowerCase();
@@ -193,7 +221,7 @@ function renderEmail(msg) {
         if (lookahead.includes('way') || lookahead.includes('ave') || lookahead.includes('st') || lookahead.includes('calle') || lookahead.includes('road')) return true;
 
         // Check for common footer terms around the code to avoid 1570121-like leaks
-        const footerTerms = ['derechos reservados', 'unsubscribe', 'privacidad', 'términos', 'copyright', 'inc.', 'privacy'];
+        const footerTerms = ['derechos reservados', 'unsubscribe', 'privacidad', 'términos', 'copyright', 'inc.', 'privacy', 'src:', 'id:', 'uuid', '121 albright'];
         const contextAroundCode = context.substring(Math.max(0, pos - 150), Math.min(context.length, pos + searchStr.length + 150)).toLowerCase();
         if (footerTerms.some(term => contextAroundCode.includes(term))) return true;
 
@@ -403,7 +431,8 @@ function renderEmail(msg) {
         <div class="card-indicator">▼</div>
     `;
 
-    resultsContainer.appendChild(item);
+    if (prepend) resultsContainer.prepend(item);
+    else resultsContainer.appendChild(item);
 
     if (isHtml) {
         const iframe = document.getElementById('iframe-' + msg.id);

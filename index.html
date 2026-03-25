@@ -40,7 +40,13 @@
             <div class="card" id="search-card">
                 <form id="searchForm" onsubmit="event.preventDefault(); searchMails();">
                     <div class="field">
-                        <label for="filterEmail">Filtrar por remitente o contenido</label>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <label for="filterEmail">Filtrar por remitente o contenido</label>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <label style="font-size:0.6rem; color:var(--text-dim);">MAX:</label>
+                                <input type="number" id="maxResultsInput" value="10" min="1" max="100" style="width:45px; background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:0.75rem; text-align:center; padding:2px;">
+                            </div>
+                        </div>
                         <div class="input-row">
                             <input type="email" id="filterEmail" required placeholder="ejemplo@remitente.com"
                                 onkeyup="this.value=this.value.replace(/\s/g,'')"
@@ -77,6 +83,19 @@
         </div>
 
         <!-- Dynamic Results -->
+        <h2 style="font-size:0.9rem; font-weight:700; color:var(--text-dim); margin-bottom:15px; display:flex; align-items:center;">
+            RESULTADOS 
+            <span id="liveStatus" class="live-badge" style="display:none; font-size: 0.61rem; color: var(--green); border: 1px solid var(--green); padding: 1px 6px; border-radius: 12px; margin-left:10px; animation: blink 1s infinite;">LIVE</span>
+        </h2>
+        
+        <style>
+            @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+            @keyframes deckFall {
+                0% { transform: translateY(-40px) scale(0.95); opacity: 0; }
+                100% { transform: translateY(0) scale(1); opacity: 1; }
+            }
+            .email-item { animation: deckFall 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        </style>
         <div id="resultsContainer"></div>
     </div>
 
