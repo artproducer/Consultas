@@ -160,14 +160,19 @@ function renderEmail(msg) {
     let foundCode = null;
     let pureText = content;
     
-    // Crucial: DOMParser completely ignores HTML attributes (like color="#000000")
+    // Crucial: DOMParser completely ignores HTML attributes and tags
     if (isHtml) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(content, 'text/html');
+        
+        // Remove style and script tags which contain code, not text
+        doc.querySelectorAll('style, script').forEach(s => s.remove());
+        
         pureText = doc.body.textContent || "";
     }
     
-    const searchContext = `${subject} | ${msg.snippet} | ${pureText}`.replace(/\s+/g, ' ');
+    // Normalize text: remove tabs, newlines and extra spaces
+    const searchContext = `${subject} | ${msg.snippet} | ${pureText}`.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ');
 
     const isInvalidCode = (c) => {
         if (/^(202[4-9]|2030)$/.test(c)) return true; // Common years
@@ -212,6 +217,21 @@ function renderEmail(msg) {
     // Smart Summary
     let displaySnippet = msg.snippet;
     const lowerSub = subject.toLowerCase();
+    
+    // Protection/Security alerts (Crunchyroll, Google, etc.)
+    if (lowerSub.includes('accedida') || lowerSub.includes('inicio de sesión') || lowerSub.includes('seguridad') || lowerSub.includes('verific')) {
+        // Strict regex for Geography (excludes CSS media query leaks)
+        const locationMatch = searchContext.match(/(?:Cerca de|Cerca|En)\s+(?!(?:and|min|max|width))\b([^,\|]{3,50}, [^,\|]{3,50}(?:, [^,\|]{3,50})?)/i);
+        const accountMatch = searchContext.match(/(?:Cuenta de Google|la cuenta)\s+([^\s]+@gmail\.com)/i);
+
+        if (accountMatch) {
+            displaySnippet = `Verificando cuenta: <strong>${accountMatch[1].trim()}</strong>`;
+        } else if (locationMatch) {
+            displaySnippet = `Inicio detectado en: <strong>${locationMatch[1].trim()}</strong>`;
+        }
+    }
+
+    // Household/Netflix specific logic
     if (lowerSub.includes('hogar') || lowerSub.includes('viaje') || lowerSub.includes('dispositivo') || lowerSub.includes('solicitaste')) {
         const netflixMatch = searchContext.match(/([A-Z][a-z]+) ha enviado una solicitud desde el dispositivo (.*?)(?= a las| \||$)/);
         const newNetflixMatch = searchContext.match(/Solicitud de (.*?), enviada desde:\s*([^,]+)/i);
@@ -220,13 +240,29 @@ function renderEmail(msg) {
             displaySnippet = `<strong>${newNetflixMatch[1].trim()}</strong> solicitó desde <strong>${newNetflixMatch[2].trim()}</strong>`;
         } else if (netflixMatch) {
             displaySnippet = `<strong>${netflixMatch[1].trim()}</strong> solicitó acceso desde <strong>${netflixMatch[2].trim()}</strong>`;
-        } else {
+        } else if (!displaySnippet.includes('Inicio detectado') && !displaySnippet.includes('Verificando')) {
             const deviceMatch = searchContext.match(/Dispositivo\s*(.*?)(?=\sFecha|\sHora|$)/i);
             if (deviceMatch) displaySnippet = `Nuevo acceso en: <strong>${deviceMatch[1].trim()}</strong>`;
         }
     }
 
-    const mainAction = findMainAction(content, isHtml);
+    // Fallback: If snippet is empty or looks like placeholder, show full sender address
+    let useFromAction = false;
+    const cleanSnippet = displaySnippet.replace(/&nbsp;/g, ' ').trim();
+    if (!cleanSnippet || cleanSnippet === '...' || cleanSnippet.toLowerCase() === 'no snippet') {
+        displaySnippet = `<span style="opacity:0.6; font-size:0.75rem;">Remitente: ${from.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`;
+        useFromAction = true;
+    }
+
+    let mainAction = findMainAction(content, isHtml);
+    
+    // If body was empty, force a "Copy Email" action
+    if (useFromAction && !mainAction) {
+        const emailOnly = from.match(/[^ <]+@[^ >]+/);
+        if (emailOnly) {
+            mainAction = { label: 'COPIAR CORREO', url: 'javascript:void(0)', isCopyEmail: true, email: emailOnly[0] };
+        }
+    }
 
     const item = document.createElement('div');
     item.className = 'email-item';
@@ -248,13 +284,40 @@ function renderEmail(msg) {
 
     let actionHtml = '';
     if (mainAction) {
-        const isNetflixConfirm = mainAction.label === 'SÍ, LO SOLICITÉ YO';
-        const btnColor = isNetflixConfirm ? '#e50914' : 'var(--green)';
-        const btnShadow = isNetflixConfirm ? 'rgba(229,9,20,0.4)' : 'var(--green-glow)';
+        const isProtection = mainAction.label === 'PROTEGER CUENTA';
+        const isBilling = mainAction.label === 'GESTIONAR PAGO';
+        const isRenew = mainAction.label === 'RENOVAR';
+        const isCopy = mainAction.isCopyEmail;
+        
+        let btnColor = 'var(--green)';
+        let btnShadow = 'var(--green-glow)';
+        let txtColor = '#000';
+        let clickAction = `event.stopPropagation()`;
 
-        // Ultra compact action button
+        if (mainAction.label === 'SÍ, LO SOLICITÉ YO') {
+            btnColor = '#e50914'; // Netflix Red
+            btnShadow = 'rgba(229,9,20,0.4)';
+        } else if (isProtection) {
+            btnColor = '#ff6600'; // Crunchyroll/Security Orange
+            btnShadow = 'rgba(255,102,0,0.4)';
+        } else if (isBilling) {
+            btnColor = '#7d2ae8'; // Canva Purple
+            btnShadow = 'rgba(125,42,232,0.4)';
+            txtColor = '#fff';
+        } else if (isRenew) {
+            btnColor = '#00c9db'; // CapCut Cyan
+            btnShadow = 'rgba(0,201,219,0.4)';
+        } else if (isCopy) {
+            btnColor = '#3498db'; // Google Blue
+            btnShadow = 'rgba(52,152,219,0.4)';
+            txtColor = '#000';
+            clickAction = `event.stopPropagation(); copyToClipboard('${mainAction.email}', 'Correo copiado')`;
+        }
+
+        const href = isCopy ? 'javascript:void(0)' : mainAction.url;
+
         actionHtml = `
-            <a href="${mainAction.url}" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex; align-items:center; justify-content:center; white-space:nowrap; height:30px; padding:0 12px; background:${btnColor}; border-radius:8px; font-size:0.7rem; font-weight:800; color:#000; text-decoration:none; box-shadow: 0 4px 10px ${btnShadow}; flex-shrink:0;">
+            <a href="${href}" target="${isCopy ? '' : '_blank'}" onclick="${clickAction}" style="display:inline-flex; align-items:center; justify-content:center; white-space:nowrap; height:30px; padding:0 12px; background:${btnColor}; border-radius:8px; font-size:0.7rem; font-weight:800; color:${txtColor}; text-decoration:none; box-shadow: 0 4px 10px ${btnShadow}; flex-shrink:0;">
                 ${mainAction.label.toUpperCase()}
             </a>
         `;
@@ -262,7 +325,7 @@ function renderEmail(msg) {
 
     item.innerHTML = `
         <div style="font-size:0.8rem; color:var(--text); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; pointer-events:none;">
-            <span style="font-weight:700; color:var(--green); letter-spacing:0.01em;">${from.split('<')[0].trim() || from}</span>
+            <span style="font-weight:700; color:var(--green); letter-spacing:0.01em;">${from.split('<')[0].trim().replace(/['"]/g, '') || from}</span>
             <span style="font-weight:600; background:rgba(255,255,255,0.06); padding:4px 10px; border-radius:10px; font-size:0.75rem; color:var(--text-dim);">${date}</span>
         </div>
         <div class="email-subject" style="pointer-events:none;">${subject}</div>
@@ -367,6 +430,9 @@ function toggleBody(item) {
 function findMainAction(content, isHtml) {
     const rules = [
         { label: 'SÍ, LO SOLICITÉ YO', regex: /sí, lo solicit[eé] yo|sí, he sido yo|sí, la envi[eé] yo|confirmar solicitud/i },
+        { label: 'RENOVAR', regex: /renew|renovar|expir[ae]|vence/i },
+        { label: 'PROTEGER CUENTA', regex: /esto no fui yo|not me|security alert|seguridad/i },
+        { label: 'GESTIONAR PAGO', regex: /actualizar método|método de pago|update payment|billing|pago/i },
         { label: 'CAMBIAR CONTRASEÑA', regex: /cambi.* contraseña|change password|reset password/i },
         { label: 'GESTIONAR HOGAR', regex: /administrar hogar|configurar hogar|manage household|gestion de hogar/i },
         { label: 'GESTIONAR ACCESO', regex: /gestionar el acceso|comprueba qué dispositivos|manage access/i },
