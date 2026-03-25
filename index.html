@@ -3,351 +3,16 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Consulta de Correos</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Consulta Inbox Pro</title>
+    <!-- Assets -->
     <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/1301/1301085.png" type="image/png">
-    <script src="https://accounts.google.com/gsi/client"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg: #0e1012;
-            --surface: #161819;
-            --surface2: #0b0d0e;
-            --border: #1e2225;
-            --border2: #252a2d;
-            --accent: #6366f1;
-            --accent-glow: rgba(99, 102, 241, 0.15);
-            --green: #3d9e68;
-            --green-dim: #2a6e49;
-            --green-glow: rgba(61, 158, 104, 0.12);
-            --text: #d8dce6;
-            --text-dim: #5a6270;
-            --text-muted: #3a4050;
-            --red-bg: #1a0f0f;
-            --red-border: #3a1f1f;
-            --danger: #ef4444;
-            --success-bg: #0e1a12;
-            --success-border: #1e3228;
-            --glass-blur: 16px;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'DM Sans', sans-serif;
-            background: var(--bg);
-            background-image: 
-                radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.05) 0%, transparent 40%),
-                radial-gradient(circle at 100% 100%, rgba(61, 158, 104, 0.05) 0%, transparent 40%);
-            min-height: 100vh;
-            display: flex;
-            align-items: flex-start;
-            justify-content: center;
-            padding: 24px 12px;
-            color: var(--text);
-        }
-
-        .wrap {
-            width: 100%;
-            max-width: 320px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        /* Header */
-        .header {
-            text-align: center;
-            margin-bottom: 8px;
-        }
-
-        .header h1 {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: #fff;
-            letter-spacing: -0.02em;
-        }
-
-        .header h1 em {
-            font-style: normal;
-            color: var(--accent);
-        }
-
-        /* Cards */
-        .card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 18px;
-            position: relative;
-            backdrop-filter: blur(var(--glass-blur));
-        }
-
-        /* Config Banner (OAuth) */
-        #config-banner {
-            background: rgba(245, 158, 11, 0.05);
-            border: 1px solid rgba(245, 158, 11, 0.2);
-            margin-bottom: 12px;
-            padding: 14px;
-            border-radius: 12px;
-        }
-
-        #config-banner p {
-            font-size: 0.7rem;
-            color: #f59e0b;
-            margin-bottom: 8px;
-            line-height: 1.4;
-        }
-
-        #config-banner input {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(245, 158, 11, 0.3);
-            color: #f59e0b;
-            font-size: 0.75rem;
-            padding: 8px 10px;
-            border-radius: 6px;
-            margin-bottom: 8px;
-            outline: none;
-        }
-
-        .config-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .config-actions button {
-            flex: 1;
-            padding: 6px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            cursor: pointer;
-            border-radius: 6px;
-            border: none;
-        }
-
-        .btn-save { background: #f59e0b; color: #000; }
-        .btn-clear { background: transparent; color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4) !important; }
-
-        /* Auth Button */
-        #authBtn {
-            width: 100%;
-            background: #fff;
-            color: #000;
-            border: none;
-            padding: 12px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            cursor: pointer;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            margin-bottom: 10px;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        #authBtn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1); }
-        #authBtn svg { width: 18px; height: 18px; }
-
-        .auth-status {
-            font-size: 0.7rem;
-            color: var(--text-dim);
-            text-align: center;
-            margin-bottom: 12px;
-        }
-
-        .auth-status.connected { color: var(--green); }
-        .auth-config-link {
-            font-size: 0.65rem;
-            color: var(--text-muted);
-            text-decoration: underline;
-            background: none;
-            border: none;
-            cursor: pointer;
-            display: block;
-            margin: -6px auto 12px;
-        }
-
-        /* Form */
-        .field label {
-            display: block;
-            font-size: 0.65rem;
-            font-weight: 600;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 6px;
-        }
-
-        .input-row {
-            position: relative;
-            display: flex;
-            align-items: center;
-        }
-
-        input[type="email"] {
-            width: 100%;
-            padding: 10px 40px 10px 12px;
-            font-size: 0.8rem;
-            background: var(--surface2);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            color: var(--text);
-            outline: none;
-            font-family: 'DM Sans', sans-serif;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-
-        input[type="email"]:focus {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 2px var(--accent-glow);
-        }
-
-        .paste-btn {
-            position: absolute;
-            right: 10px;
-            cursor: pointer;
-            font-size: 1rem;
-            color: var(--text-muted);
-            transition: color 0.2s;
-        }
-
-        .paste-btn:hover { color: var(--accent); }
-
-        .btn-submit {
-            width: 100%;
-            margin-top: 12px;
-            padding: 12px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: #fff;
-            background: var(--accent);
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: background 0.2s, transform 0.1s;
-        }
-
-        .btn-submit:hover:not(:disabled) { background: #4f46e5; transform: translateY(-1px); }
-        .btn-submit:active:not(:disabled) { transform: translateY(0); }
-        .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        /* Results */
-        #resultsContainer {
-            margin-top: 6px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .email-item {
-            background: var(--surface2);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 12px;
-            animation: slideUp 0.3s ease-out;
-        }
-
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .email-subject {
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: #fff;
-            margin-bottom: 4px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .email-snippet {
-            font-size: 0.72rem;
-            color: var(--text-dim);
-            line-height: 1.4;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            margin-bottom: 8px;
-        }
-
-        .email-meta {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.65rem;
-            color: var(--text-muted);
-        }
-
-        .btn-view {
-            color: var(--accent);
-            text-decoration: none;
-            font-weight: 600;
-        }
-
-        .btn-view:hover { text-decoration: underline; }
-
-        /* Loader */
-        #loader {
-            display: none;
-            justify-content: center;
-            padding: 10px 0;
-            gap: 6px;
-        }
-
-        .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: bop 1.2s infinite ease-in-out; }
-        .dot:nth-child(2) { animation-delay: 0.18s; }
-        .dot:nth-child(3) { animation-delay: 0.36s; }
-        @keyframes bop { 0%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-10px); } }
-
-        /* Notification Toast */
-        #toast {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%) translateY(20px);
-            background: var(--surface);
-            border: 1px solid var(--border);
-            padding: 10px 18px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 500;
-            opacity: 0;
-            transition: all 0.3s;
-            z-index: 1000;
-            pointer-events: none;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-        }
-
-        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        #toast.error { border-color: rgba(239, 68, 68, 0.3); color: var(--danger); }
-        #toast.success { border-color: rgba(34, 197, 94, 0.3); color: var(--green); }
-
-        .disconnect {
-            position: absolute;
-            top: 14px;
-            right: 14px;
-            font-size: 0.65rem;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 4px 8px;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            background: rgba(255,255,255,0.03);
-        }
-        .disconnect:hover { color: var(--danger); background: rgba(239, 68, 68, 0.05); }
-
-    </style>
+    <!-- Google Identity Services -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Local Styles -->
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
@@ -357,9 +22,9 @@
             <h1>Consulta <em>Inbox</em></h1>
         </div>
 
-        <!-- OAuth Config (similar to Imprimir) -->
+        <!-- OAuth Configuration -->
         <div id="config-banner" style="display:none">
-            <p>Configura tu Google OAuth Client ID.<br>Origen: <strong id="showOrigin"></strong></p>
+            <p>Configura tu <strong>Google OAuth Client ID</strong>.<br>Origen: <strong id="showOrigin"></strong></p>
             <input type="text" id="clientIdInput" placeholder="XXXXXXXXXXXX.apps.googleusercontent.com">
             <div class="config-actions">
                 <button class="btn-save" onclick="saveClientId()">Guardar</button>
@@ -367,305 +32,55 @@
             </div>
         </div>
 
-        <div class="card" id="authCard">
-            <button id="authBtn" onclick="startAuth()">
-                <svg viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                </svg>
-                Conectar con Google
-            </button>
-            <div class="auth-status" id="authStatus">Requiere acceso a Gmail</div>
-            <button class="auth-config-link" id="authConfigBtn" onclick="toggleConfig()">Configurar OAuth</button>
-        </div>
+        <div id="main-search-card">
+            <!-- Authentication Flow -->
+            <div class="card" id="authCard">
+                <button id="authBtn" onclick="startAuth()">
+                    <svg viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                    </svg>
+                    Conectar con Google
+                </button>
+                <div class="auth-status" id="authStatus">Requiere acceso a Gmail</div>
+                <button class="auth-config-link" id="authConfigBtn" onclick="toggleConfig()">Configurar OAuth</button>
+            </div>
 
-        <div class="card">
-            <form id="searchForm" onsubmit="event.preventDefault(); searchMails();">
-                <div class="field">
-                    <label for="filterEmail">Filtrar por remitente</label>
-                    <div class="input-row">
-                        <input type="email" id="filterEmail" required placeholder="ejemplo@remitente.com"
-                            onkeyup="this.value=this.value.replace(/\s/g,'')"
-                            ondblclick="this.value='';this.focus();">
-                        <span class="paste-btn" onclick="pasteFromClipboard()">📋</span>
+            <!-- Search Form -->
+            <div class="card" id="search-card">
+                <form id="searchForm" onsubmit="event.preventDefault(); searchMails();">
+                    <div class="field">
+                        <label for="filterEmail">Filtrar por remitente o contenido</label>
+                        <div class="input-row">
+                            <input type="email" id="filterEmail" required placeholder="ejemplo@remitente.com"
+                                onkeyup="this.value=this.value.replace(/\s/g,'')"
+                                ondblclick="this.value='';this.focus();">
+                            <span class="paste-btn" title="Pegar" onclick="pasteFromClipboard()">📋</span>
+                        </div>
                     </div>
-                </div>
-                <button type="submit" class="btn-submit" id="submitBtn">Buscar Correos</button>
-            </form>
+                    <button type="submit" class="btn-submit" id="submitBtn">Buscar Correos</button>
+                </form>
+            </div>
         </div>
 
+        <!-- Status Indicator -->
         <div id="loader">
             <div class="dot"></div>
             <div class="dot"></div>
             <div class="dot"></div>
         </div>
 
+        <!-- Dynamic Results -->
         <div id="resultsContainer"></div>
     </div>
 
+    <!-- Notification Overlay -->
     <div id="toast"></div>
 
-    <script>
-        // ─── CONFIG ────────────────────────────────────────────────────────────────
-        const HARDCODED_CLIENT_ID = ''; // Opcional
-        const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
-        const SK_CID = 'query_client_id';
-        const SK_ACCESS = 'query_access_token';
-        const SK_EXPIRY = 'query_token_expiry';
-
-        let accessToken = null;
-        let tokenClient = null;
-        let isSearching = false;
-
-        // UI Elements
-        const authBtn = document.getElementById('authBtn');
-        const authText = document.getElementById('authStatus');
-        const banner = document.getElementById('config-banner');
-        const clientIdInput = document.getElementById('clientIdInput');
-        const resultsContainer = document.getElementById('resultsContainer');
-        const loader = document.getElementById('loader');
-        const submitBtn = document.getElementById('submitBtn');
-
-        // ─── AUTH LOGIC (GIS) ──────────────────────────────────────────────────────
-        function getSavedClientId() { return localStorage.getItem(SK_CID) || ''; }
-        function getClientId() { return HARDCODED_CLIENT_ID || getSavedClientId(); }
-        
-        function syncConfigUi() {
-            if (HARDCODED_CLIENT_ID) {
-                document.getElementById('authConfigBtn').style.display = 'none';
-                return;
-            }
-            clientIdInput.value = getSavedClientId();
-        }
-
-        function toggleConfig() { banner.style.display = banner.style.display === 'none' ? 'block' : 'none'; }
-        
-        function saveClientId() {
-            const val = clientIdInput.value.trim();
-            if (!val) return;
-            localStorage.setItem(SK_CID, val);
-            banner.style.display = 'none';
-            showToast('Client ID guardado', 'success');
-            if (window.google) initTokenClient();
-        }
-
-        function clearClientId() {
-            localStorage.removeItem(SK_CID);
-            clientIdInput.value = '';
-            showToast('Configuración borrada', 'error');
-        }
-
-        function initTokenClient() {
-            const cid = getClientId();
-            if (!cid || !window.google) return false;
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: cid,
-                scope: SCOPE,
-                callback: handleTokenResponse,
-                error_callback: (err) => showToast('Error Google: ' + (err.type || 'Error'), 'error')
-            });
-            return true;
-        }
-
-        function startAuth() {
-            const cid = getClientId();
-            if (!cid) { toggleConfig(); return; }
-            if (!tokenClient && !initTokenClient()) return;
-            tokenClient.requestAccessToken({ prompt: 'consent' });
-        }
-
-        function handleTokenResponse(res) {
-            if (res.error) { showToast('Error: ' + res.error, 'error'); return; }
-            accessToken = res.access_token;
-            localStorage.setItem(SK_ACCESS, accessToken);
-            localStorage.setItem(SK_EXPIRY, Date.now() + (res.expires_in * 1000));
-            onAuthed();
-        }
-
-        function onAuthed() {
-            authBtn.style.display = 'none';
-            document.getElementById('authConfigBtn').style.display = 'none';
-            authText.className = 'auth-status connected';
-            authText.textContent = '✓ Sesión Gmail activa';
-            
-            const card = document.getElementById('authCard');
-            if (!card.querySelector('.disconnect')) {
-                const btn = document.createElement('div');
-                btn.className = 'disconnect';
-                btn.textContent = 'Cerrar';
-                btn.onclick = logout;
-                card.appendChild(btn);
-            }
-        }
-
-        function logout() {
-            localStorage.removeItem(SK_ACCESS);
-            localStorage.removeItem(SK_EXPIRY);
-            accessToken = null;
-            location.reload();
-        }
-
-        function isTokenValid() {
-            const exp = parseInt(localStorage.getItem(SK_EXPIRY) || '0');
-            return exp > Date.now();
-        }
-
-        // ─── SEARCH LOGIC ──────────────────────────────────────────────────────────
-        async function searchMails() {
-            if (isSearching) return;
-            
-            // Check session
-            if (!accessToken && isTokenValid()) {
-                accessToken = localStorage.getItem(SK_ACCESS);
-                onAuthed();
-            }
-
-            if (!accessToken) {
-                showToast('Primero conecta con Google', 'error');
-                startAuth();
-                return;
-            }
-
-            const filter = document.getElementById('filterEmail').value.trim();
-            if (!filter) return;
-
-            setLoading(true);
-            resultsContainer.innerHTML = '';
-
-            try {
-                // 1. Search messages: Broad search to avoid missing anything
-                // search for the email as sender, recipient, or just keyword
-                const queryStr = `${filter}`;
-                const query = encodeURIComponent(queryStr);
-                
-                const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=10`, {
-                    headers: { 'Authorization': 'Bearer ' + accessToken }
-                });
-
-                if (listRes.status === 401) { logout(); throw new Error('Sesión expirada. Por favor reconecta.'); }
-                if (!listRes.ok) {
-                    const err = await listRes.json();
-                    throw new Error(err.error?.message || 'Error buscando correos');
-                }
-
-                const listData = await listRes.json();
-                
-                if (!listData.messages || listData.messages.length === 0) {
-                    resultsContainer.innerHTML = `
-                        <div style="text-align:center; padding:30px;">
-                            <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:10px;">No se encontraron correos para:</div>
-                            <div style="font-size:0.85rem; font-weight:600; color:var(--text);">${filter}</div>
-                            <div style="font-size:0.7rem; color:var(--text-muted); margin-top:20px;">Asegúrate de que el remitente o el contenido use exactamente este correo.</div>
-                        </div>`;
-                    setLoading(false);
-                    return;
-                }
-
-                // 2. Fetch details for each
-                for (const msg of listData.messages) {
-                    const detailRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`, {
-                        headers: { 'Authorization': 'Bearer ' + accessToken }
-                    });
-                    const data = await detailRes.json();
-                    renderEmail(data);
-                }
-
-            } catch (err) {
-                showToast(err.message, 'error');
-            } finally {
-                setLoading(false);
-            }
-        }
-
-        function renderEmail(msg) {
-            const headers = msg.payload.headers;
-            const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(Sin asunto)';
-            const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
-            const dateStr = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
-            const date = new Date(dateStr).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-            
-            // Try to find a verification code (6 digits usually)
-            const codeMatch = msg.snippet.match(/\b\d{5,6}\b/);
-            const foundCode = codeMatch ? codeMatch[0] : null;
-
-            const item = document.createElement('div');
-            item.className = 'email-item';
-            item.style.position = 'relative';
-            
-            let codeHtml = '';
-            if (foundCode) {
-                codeHtml = `
-                    <div style="margin-top:8px; display:flex; align-items:center; gap:10px; padding:10px; background:rgba(61, 158, 104, 0.1); border-radius:8px; border:1px solid rgba(61, 158, 104, 0.2);">
-                        <span style="font-family:'DM Mono'; font-size:1.1rem; color:var(--green); letter-spacing:2px; font-weight:600;">${foundCode}</span>
-                        <span style="font-size:0.6rem; color:var(--green); text-transform:uppercase;">Código detectado</span>
-                        <button onclick="copyCode('${foundCode}')" style="margin-left:auto; background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:0.9rem;">📋</button>
-                    </div>
-                `;
-            }
-
-            item.innerHTML = `
-                <div style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px; display:flex; justify-content:space-between;">
-                    <span>${from.split('<')[0]}</span>
-                    <span>${date}</span>
-                </div>
-                <div class="email-subject">${subject}</div>
-                <div class="email-snippet">${msg.snippet}</div>
-                ${codeHtml}
-                <div class="email-meta" style="margin-top:8px;">
-                    <a href="https://mail.google.com/mail/u/0/#inbox/${msg.id}" target="_blank" class="btn-view">Abrir Correo completo</a>
-                </div>
-            `;
-            resultsContainer.appendChild(item);
-        }
-
-        function copyCode(code) {
-            navigator.clipboard.writeText(code)
-                .then(() => showToast('Código copiado: ' + code, 'success'))
-                .catch(() => showToast('Error al copiar', 'error'));
-        }
-
-        // ─── UI UTILS ──────────────────────────────────────────────────────────────
-        function setLoading(on) {
-            isSearching = on;
-            loader.style.display = on ? 'flex' : 'none';
-            submitBtn.disabled = on;
-            submitBtn.textContent = on ? 'Buscando...' : 'Buscar Correos';
-        }
-
-        function showToast(text, type = 'error') {
-            const t = document.getElementById('toast');
-            t.textContent = text;
-            t.className = `show ${type}`;
-            setTimeout(() => t.classList.remove('show'), 3000);
-        }
-
-        function pasteFromClipboard() {
-            navigator.clipboard.readText().then(text => {
-                const clean = text.trim();
-                if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
-                    document.getElementById('filterEmail').value = clean;
-                    showToast('Correo pegado', 'success');
-                } else {
-                    showToast('Contenido no es un correo válido', 'error');
-                }
-            }).catch(() => showToast('Error al pegar', 'error'));
-        }
-
-        // ─── INIT ──────────────────────────────────────────────────────────────────
-        window.addEventListener('load', () => {
-            document.getElementById('showOrigin').textContent = location.origin;
-            syncConfigUi();
-            
-            if (isTokenValid()) {
-                accessToken = localStorage.getItem(SK_ACCESS);
-                onAuthed();
-            }
-            
-            if (window.google) initTokenClient();
-        });
-    </script>
+    <!-- Local Logic -->
+    <script src="script.js" defer></script>
 </body>
 
 </html>
