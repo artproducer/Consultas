@@ -119,8 +119,9 @@ async function searchMails(isSilent = false) {
     }
 
     try {
+        const maxLimit = document.getElementById('maxResultsInput').value || 10;
         const query = encodeURIComponent(`${filter} newer_than:15d`);
-        const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=10`, {
+        const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=${maxLimit}`, {
             headers: { 'Authorization': 'Bearer ' + accessToken }
         });
 
@@ -143,13 +144,14 @@ async function searchMails(isSilent = false) {
         // We reverse to keep chronological order when prepending
         const newBatch = listData.messages.filter(m => !renderedMessageIds.has(m.id)).reverse();
 
-        for (const msg of newBatch) {
+        for (let i = 0; i < newBatch.length; i++) {
+            const msg = newBatch[i];
             const detailRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`, {
                 headers: { 'Authorization': 'Bearer ' + accessToken }
             });
             const data = await detailRes.json();
             renderedMessageIds.add(msg.id);
-            renderEmail(data, true);
+            renderEmail(data, true, i); 
         }
 
     } catch (err) {
@@ -170,7 +172,7 @@ function startPolling() {
     }, 2000);
 }
 
-function renderEmail(msg, prepend = false) {
+function renderEmail(msg, prepend = false, animIndex = 0) {
     const headers = msg.payload.headers;
     const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(Sin asunto)';
     const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
@@ -341,6 +343,7 @@ function renderEmail(msg, prepend = false) {
 
     const item = document.createElement('div');
     item.className = 'email-item';
+    item.style.animationDelay = (animIndex * 0.08) + 's';
     item.onclick = (e) => {
         if (!e.target.closest('a') && !e.target.closest('.copy-mini')) {
             toggleBody(item);
