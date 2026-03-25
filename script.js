@@ -5,7 +5,7 @@
 
 // ─── CONFIGURATION ───────────────────────────────────────────────────────────
 const HARDCODED_CLIENT_ID = 'TU-CLIENT-ID.apps.googleusercontent.com'; // Pre-filled placeholder
-const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email';
 const SK_CID = 'query_client_id';
 const SK_ACCESS = 'query_access_token';
 const SK_EXPIRY = 'query_token_expiry';
@@ -15,9 +15,11 @@ let tokenClient = null;
 let isSearching = false;
 let pollingInterval = null;
 let renderedMessageIds = new Set();
+let latestSeenInternalDate = 0;
+let defaultAuthBtnHtml = '';
 
 // DOM Cache
-let resultsContainer, loader, submitBtn, filterInput, authBtn, authText, banner, clientIdInput;
+let resultsContainer, loader, submitBtn, filterInput, authBtn, authText, banner, clientIdInput, backToTopBtn, clearFilterBtn;
 
 // ─── AUTHENTICATION (GIS) ────────────────────────────────────────────────────
 function getSavedClientId() { return localStorage.getItem(SK_CID) || HARDCODED_CLIENT_ID; }
@@ -56,6 +58,7 @@ function onAuthed() {
     card.classList.add('connected');
 
     authText.textContent = 'Sesión Activa';
+    loadConnectedUserAvatar();
 
     // Clicking icon while authed toggles the menu (good for mobile)
     authBtn.onclick = (e) => {
@@ -74,6 +77,33 @@ function onAuthed() {
             logout();
         };
         authText.appendChild(btn);
+    }
+}
+
+function setAuthDefaultIcon() {
+    if (!authBtn) return;
+    authBtn.classList.remove('has-avatar');
+    if (defaultAuthBtnHtml) authBtn.innerHTML = defaultAuthBtnHtml;
+}
+
+function setAuthAvatar(photoUrl) {
+    if (!authBtn || !photoUrl) return;
+    authBtn.classList.add('has-avatar');
+    authBtn.innerHTML = `<img class="auth-avatar" src="${photoUrl}" alt="Perfil">`;
+}
+
+async function loadConnectedUserAvatar() {
+    if (!accessToken) return;
+    try {
+        const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { 'Authorization': 'Bearer ' + accessToken }
+        });
+        if (!res.ok) throw new Error('No profile');
+        const data = await res.json();
+        if (data && data.picture) setAuthAvatar(data.picture);
+        else setAuthDefaultIcon();
+    } catch (_) {
+        setAuthDefaultIcon();
     }
 }
 
@@ -115,7 +145,11 @@ async function searchMails(isSilent = false) {
         setLoading(true);
         resultsContainer.innerHTML = '';
         renderedMessageIds.clear();
+        latestSeenInternalDate = 0;
         document.getElementById('liveStatus').style.display = 'none';
+    } else {
+        // Silent polling must also lock to avoid overlapping requests
+        isSearching = true;
     }
 
     try {
@@ -141,7 +175,7 @@ async function searchMails(isSilent = false) {
             return;
         }
 
-        // We reverse to keep chronological order when prepending
+        // Mantener orden de carga anterior
         const newBatch = listData.messages.filter(m => !renderedMessageIds.has(m.id)).reverse();
 
         for (let i = 0; i < newBatch.length; i++) {
@@ -150,14 +184,18 @@ async function searchMails(isSilent = false) {
                 headers: { 'Authorization': 'Bearer ' + accessToken }
             });
             const data = await detailRes.json();
+            const msgInternalDate = Number(data.internalDate || 0);
+            const shouldHighlightNew = isSilent && msgInternalDate > latestSeenInternalDate;
+            latestSeenInternalDate = Math.max(latestSeenInternalDate, msgInternalDate);
             renderedMessageIds.add(msg.id);
-            renderEmail(data, true, i); 
+            renderEmail(data, true, i, shouldHighlightNew);
         }
 
     } catch (err) {
         if (!isSilent) showToast(err.message, 'error');
     } finally {
-        setLoading(false);
+        if (!isSilent) setLoading(false);
+        else isSearching = false;
         if (!isSilent) startPolling();
     }
 }
@@ -172,7 +210,7 @@ function startPolling() {
     }, 2000);
 }
 
-function renderEmail(msg, prepend = false, animIndex = 0) {
+function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false) {
     const headers = msg.payload.headers;
     const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(Sin asunto)';
     const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
@@ -343,9 +381,9 @@ function renderEmail(msg, prepend = false, animIndex = 0) {
 
     const item = document.createElement('div');
     item.className = 'email-item';
-    item.style.animationDelay = (animIndex * 0.08) + 's';
     item.onclick = (e) => {
         if (!e.target.closest('a') && !e.target.closest('.copy-mini')) {
+            item.classList.remove('email-item-new-live');
             toggleBody(item);
         }
     };
@@ -409,9 +447,11 @@ function renderEmail(msg, prepend = false, animIndex = 0) {
     }
 
     item.innerHTML = `
-        <div style="font-size:0.8rem; color:var(--text); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; pointer-events:none;">
-            <span style="font-weight:700; color:var(--green); letter-spacing:0.01em;">${from.split('<')[0].trim().replace(/['"]/g, '') || from}</span>
-            <span style="font-weight:600; background:rgba(255,255,255,0.06); padding:4px 10px; border-radius:10px; font-size:0.75rem; color:var(--text-dim);">${date}</span>
+        <div class="email-top-row">
+            <span class="email-from">${from.split('<')[0].trim().replace(/['"]/g, '') || from}</span>
+            <div class="email-top-actions">
+                <span class="email-date">${date}</span>
+            </div>
         </div>
         <div class="email-subject" style="pointer-events:none;">${subject}</div>
         
@@ -433,6 +473,11 @@ function renderEmail(msg, prepend = false, animIndex = 0) {
         </div>
         <div class="card-indicator">▼</div>
     `;
+
+    if (highlightAsNew) {
+        document.querySelectorAll('.email-item-new-live').forEach(el => el.classList.remove('email-item-new-live'));
+        item.classList.add('email-item-new-live');
+    }
 
     if (prepend) resultsContainer.prepend(item);
     else resultsContainer.appendChild(item);
@@ -510,6 +555,12 @@ function toggleBody(item) {
         summary.style.display = 'none';
         indicator.style.transform = 'rotate(180deg)';
     }
+}
+
+function updateBackToTopVisibility() {
+    if (!backToTopBtn) return;
+    const shouldShow = window.scrollY > 240;
+    backToTopBtn.classList.toggle('show', shouldShow);
 }
 
 // Manual extractor based on keywords
@@ -611,9 +662,12 @@ document.addEventListener('DOMContentLoaded', () => {
     submitBtn = document.getElementById('submitBtn');
     filterInput = document.getElementById('filterEmail');
     authBtn = document.getElementById('authBtn');
+    defaultAuthBtnHtml = authBtn ? authBtn.innerHTML : '';
     authText = document.getElementById('authStatus');
     banner = document.getElementById('config-banner');
     clientIdInput = document.getElementById('clientIdInput');
+    backToTopBtn = document.getElementById('backToTopBtn');
+    clearFilterBtn = document.getElementById('clearFilterBtn');
 
     document.getElementById('showOrigin').textContent = location.origin;
     clientIdInput.value = getSavedClientId();
@@ -626,6 +680,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load GIS
     if (window.google) initTokenClient();
+
+    if (backToTopBtn) {
+        backToTopBtn.addEventListener('click', () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+    }
+    if (filterInput && clearFilterBtn) {
+        filterInput.addEventListener('input', updateClearFilterVisibility);
+        updateClearFilterVisibility();
+    }
+    window.addEventListener('scroll', updateBackToTopVisibility, { passive: true });
+    updateBackToTopVisibility();
 });
 
 // Helper for UI paste
@@ -634,6 +700,7 @@ window.pasteFromClipboard = function () {
         const clean = text.trim();
         if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
             filterInput.value = clean;
+            updateClearFilterVisibility();
             showToast('Correo pegado', 'success');
             searchMails();
         } else {
@@ -642,8 +709,21 @@ window.pasteFromClipboard = function () {
     }).catch(() => showToast('Permiso denegado', 'error'));
 };
 
+window.clearFilterInput = function () {
+    filterInput.value = '';
+    filterInput.focus();
+    updateClearFilterVisibility();
+};
+
+function updateClearFilterVisibility() {
+    if (!clearFilterBtn || !filterInput) return;
+    const show = filterInput.value.trim().length > 0;
+    clearFilterBtn.classList.toggle('show', show);
+}
+
 document.getElementById('filterEmail').addEventListener('paste', () => {
     setTimeout(() => {
+        updateClearFilterVisibility();
         const clean = filterInput.value.trim();
         if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
             searchMails();

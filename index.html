@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 
 <head>
@@ -24,7 +24,7 @@
 
         <!-- Intelligence Configuration -->
         <div id="config-banner" style="display:none">
-            <p><strong>Configuración de Inteligencia</strong><br>Origen: <strong id="showOrigin"></strong></p>
+            <p><strong>ConfiguraciÃ³n de Inteligencia</strong><br>Origen: <strong id="showOrigin"></strong></p>
             
             <label class="config-label">Google OAuth Client ID</label>
             <input type="text" id="clientIdInput" placeholder="XXXXXXXXXXXX.apps.googleusercontent.com">
@@ -40,18 +40,19 @@
             <div class="card" id="search-card">
                 <form id="searchForm" onsubmit="event.preventDefault(); searchMails();">
                     <div class="field">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <label for="filterEmail">Filtrar por remitente o contenido</label>
-                            <div style="display:flex; align-items:center; gap:8px;">
-                                <label style="font-size:0.6rem; color:var(--text-dim);">MAX:</label>
-                                <input type="number" id="maxResultsInput" value="10" min="1" max="100" style="width:45px; background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:0.75rem; text-align:center; padding:2px;">
-                            </div>
-                        </div>
+                        <label for="filterEmail">Filtrar por remitente</label>
                         <div class="input-row">
                             <input type="email" id="filterEmail" required placeholder="ejemplo@remitente.com"
                                 onkeyup="this.value=this.value.replace(/\s/g,'')"
                                 ondblclick="this.value='';this.focus();">
-                            <span class="paste-btn" title="Pegar" onclick="pasteFromClipboard()">📋</span>
+                            <span id="clearFilterBtn" class="clear-btn" title="Limpiar" onclick="clearFilterInput()">×</span>
+                            <span class="paste-btn" title="Pegar" onclick="pasteFromClipboard()">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M9 4h6a1 1 0 0 1 1 1v2H8V5a1 1 0 0 1 1-1z" fill="currentColor"/>
+                                    <rect x="6" y="7" width="12" height="13" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="2.8"/>
+                                    <path d="M10 11h4M10 14h4" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                                </svg>
+                            </span>
                         </div>
                     </div>
                     <button type="submit" class="btn-submit" id="submitBtn">Buscar Correos</button>
@@ -83,21 +84,25 @@
         </div>
 
         <!-- Dynamic Results -->
-        <h2 style="font-size:0.9rem; font-weight:700; color:var(--text-dim); margin-bottom:15px; display:flex; align-items:center;">
-            RESULTADOS 
-            <span id="liveStatus" class="live-badge" style="display:none; font-size: 0.61rem; color: var(--green); border: 1px solid var(--green); padding: 1px 6px; border-radius: 12px; margin-left:10px; animation: blink 1s infinite;">LIVE</span>
-        </h2>
+        <div class="results-head">
+            <h2 style="font-size:0.9rem; font-weight:700; color:var(--text-dim); margin-bottom:0; display:flex; align-items:center;">
+                RESULTADOS 
+                <span id="liveStatus" class="live-dot" style="display:none; width:8px; height:8px; border-radius:50%; background:var(--green); margin-left:10px;"></span>
+            </h2>
+            <div class="max-control max-control-results">
+                <label for="maxResultsInput" class="max-label">MAX</label>
+                <input type="number" id="maxResultsInput" value="10" min="1" max="100">
+            </div>
+        </div>
         
-        <style>
-            @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
-            @keyframes deckFall {
-                0% { transform: translateY(-40px) scale(0.95); opacity: 0; }
-                100% { transform: translateY(0) scale(1); opacity: 1; }
-            }
-            .email-item { animation: deckFall 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        </style>
         <div id="resultsContainer"></div>
     </div>
+
+    <button id="backToTopBtn" class="back-to-top" title="Volver al inicio" aria-label="Volver al inicio">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 14l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </button>
 
     <!-- Notification Overlay -->
     <div id="toast"></div>
@@ -107,3 +112,6 @@
 </body>
 
 </html>
+
+
+
