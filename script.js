@@ -17,6 +17,8 @@ let pollingInterval = null;
 let renderedMessageIds = new Set();
 let latestSeenInternalDate = 0;
 let defaultAuthBtnHtml = '';
+let tokenWatchInterval = null;
+let suppressAuthErrors = false;
 
 // DOM Cache
 let resultsContainer, loader, submitBtn, filterInput, authBtn, authText, banner, clientIdInput, backToTopBtn, clearFilterBtn;
@@ -32,7 +34,13 @@ function initTokenClient() {
         client_id: cid,
         scope: SCOPE,
         callback: handleTokenResponse,
-        error_callback: (err) => showToast('Error Google: ' + (err.type || 'Error'), 'error')
+        error_callback: (err) => {
+            if (suppressAuthErrors) {
+                suppressAuthErrors = false;
+                return;
+            }
+            showToast('Error Google: ' + (err.type || 'Error'), 'error');
+        }
     });
     return true;
 }
@@ -46,7 +54,12 @@ function startAuth() {
 }
 
 function handleTokenResponse(res) {
-    if (res.error) { showToast('Error: ' + res.error, 'error'); return; }
+    if (res.error) {
+        if (!suppressAuthErrors) showToast('Error: ' + res.error, 'error');
+        suppressAuthErrors = false;
+        return;
+    }
+    suppressAuthErrors = false;
     accessToken = res.access_token;
     localStorage.setItem(SK_ACCESS, accessToken);
     localStorage.setItem(SK_EXPIRY, Date.now() + (res.expires_in * 1000));
@@ -59,6 +72,7 @@ function onAuthed() {
 
     authText.textContent = 'Sesión Activa';
     loadConnectedUserAvatar();
+    startTokenWatch();
 
     // Clicking icon while authed toggles the menu (good for mobile)
     authBtn.onclick = (e) => {
@@ -111,12 +125,33 @@ function logout() {
     localStorage.removeItem(SK_ACCESS);
     localStorage.removeItem(SK_EXPIRY);
     accessToken = null;
+    if (tokenWatchInterval) clearInterval(tokenWatchInterval);
     location.reload();
 }
 
 function isTokenValid() {
     const exp = parseInt(localStorage.getItem(SK_EXPIRY) || '0');
     return exp > Date.now();
+}
+
+function isTokenExpiringSoon(bufferMs = 120000) {
+    const exp = parseInt(localStorage.getItem(SK_EXPIRY) || '0');
+    if (!exp) return true;
+    return (exp - Date.now()) <= bufferMs;
+}
+
+function refreshAccessTokenSilently() {
+    if (!tokenClient && !initTokenClient()) return;
+    suppressAuthErrors = true;
+    tokenClient.requestAccessToken({ prompt: '' });
+}
+
+function startTokenWatch() {
+    if (tokenWatchInterval) clearInterval(tokenWatchInterval);
+    tokenWatchInterval = setInterval(() => {
+        if (!accessToken) return;
+        if (isTokenExpiringSoon()) refreshAccessTokenSilently();
+    }, 60000);
 }
 
 // ─── SEARCH & RENDER ─────────────────────────────────────────────────────────
@@ -684,6 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isTokenValid()) {
         accessToken = localStorage.getItem(SK_ACCESS);
         onAuthed();
+        if (isTokenExpiringSoon(180000)) refreshAccessTokenSilently();
     }
 
     // Load GIS
