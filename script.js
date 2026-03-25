@@ -5,10 +5,8 @@
 
 // ─── CONFIGURATION ───────────────────────────────────────────────────────────
 const HARDCODED_CLIENT_ID = '340536761168-1p62v96f8669d0qjcliaem6e00i98n4d.apps.googleusercontent.com'; // Pre-filled
-const HARDCODED_GEMINI_KEY = 'AIzaSyBdVA8AidC-c8Xk0JRZz_q0d1hUJa-Sxdc'; // Pre-filled as requested
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const SK_CID = 'query_client_id';
-const SK_GEMINI = 'query_gemini_key';
 const SK_ACCESS = 'query_access_token';
 const SK_EXPIRY = 'query_token_expiry';
 
@@ -17,11 +15,10 @@ let tokenClient = null;
 let isSearching = false;
 
 // DOM Cache
-let resultsContainer, loader, submitBtn, filterInput, authBtn, authText, banner, clientIdInput, geminiKeyInput;
+let resultsContainer, loader, submitBtn, filterInput, authBtn, authText, banner, clientIdInput;
 
 // ─── AUTHENTICATION (GIS) ────────────────────────────────────────────────────
 function getSavedClientId() { return localStorage.getItem(SK_CID) || HARDCODED_CLIENT_ID; }
-function getSavedGeminiKey() { return localStorage.getItem(SK_GEMINI) || HARDCODED_GEMINI_KEY; }
 function getClientId() { return getSavedClientId(); }
 
 function initTokenClient() {
@@ -37,6 +34,7 @@ function initTokenClient() {
 }
 
 function startAuth() {
+    if (accessToken) return; // Prevent prompt if already connected
     const cid = getClientId();
     if (!cid) { toggleConfig(); return; }
     if (!tokenClient && !initTokenClient()) return;
@@ -52,18 +50,28 @@ function handleTokenResponse(res) {
 }
 
 function onAuthed() {
-    authBtn.style.display = 'none';
-    document.getElementById('authConfigBtn').style.display = 'none';
-    authText.className = 'auth-status connected';
-    authText.textContent = '✓ Sesión Gmail activa';
-    
     const card = document.getElementById('authCard');
-    if (!card.querySelector('.disconnect')) {
-        const btn = document.createElement('div');
-        btn.className = 'disconnect';
+    card.classList.add('connected');
+    
+    authText.textContent = 'Sesión Activa';
+    
+    // Clicking icon while authed toggles the menu (good for mobile)
+    authBtn.onclick = (e) => {
+        e.stopPropagation();
+        authText.style.opacity = authText.style.opacity === '1' ? '0' : '1';
+        authText.style.pointerEvents = authText.style.opacity === '1' ? 'auto' : 'none';
+    };
+    
+    // Put Disconnect inside the status hover area
+    if (!authText.querySelector('.disconnect-btn')) {
+        const btn = document.createElement('button');
+        btn.className = 'disconnect-btn';
         btn.textContent = 'Cerrar';
-        btn.onclick = logout;
-        card.appendChild(btn);
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            logout();
+        };
+        authText.appendChild(btn);
     }
 }
 
@@ -129,7 +137,7 @@ async function searchMails() {
                 headers: { 'Authorization': 'Bearer ' + accessToken }
             });
             const data = await detailRes.json();
-            await renderEmail(data);
+            renderEmail(data);
         }
 
     } catch (err) {
@@ -139,7 +147,7 @@ async function searchMails() {
     }
 }
 
-async function renderEmail(msg) {
+function renderEmail(msg) {
     const headers = msg.payload.headers;
     const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(Sin asunto)';
     const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
@@ -147,34 +155,84 @@ async function renderEmail(msg) {
     const date = new Date(dateStr).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
     
     const { content, isHtml } = extractBody(msg.payload);
-    
-    // Detect code (5-6 digits)
-    const codeMatch = msg.snippet.match(/\b\d{5,6}\b/);
-    const foundCode = codeMatch ? codeMatch[0] : null;
 
-    // Detect Main Action (Local Fallback)
-    let mainAction = findMainAction(content, isHtml);
+    // Advanced Code Detection with DOM Parsing (Disney+, Netflix, etc.)
+    let foundCode = null;
+    let pureText = content;
     
-    // AI Intelligent Extraction if key is present
-    const gKey = getSavedGeminiKey();
-    if (gKey) {
-        const aiAction = await analyzeWithGemini(msg.snippet, content, gKey);
-        if (aiAction) mainAction = aiAction;
+    // Crucial: DOMParser completely ignores HTML attributes (like color="#000000")
+    if (isHtml) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(content, 'text/html');
+        pureText = doc.body.textContent || "";
     }
+    
+    const searchContext = `${subject} | ${msg.snippet} | ${pureText}`.replace(/\s+/g, ' ');
+
+    const isInvalidCode = (c) => {
+        if (/^(202[4-9]|2030)$/.test(c)) return true; // Common years
+        if (/^(\d)\1+$/.test(c)) return true; // Kills '000000', '777777', etc.
+        if (/^(91521|95032|1050)$/.test(c)) return true; // Disney/Netflix explicit zip/buildings
+        return false;
+    };
+
+    // 1. Precise Proximity Match (Code AFTER keyword - up to 200 chars away)
+    // ONLY looks for 6 to 8 digits (ignores 5-digit Zip codes like 91521 entirely)
+    const afterRegex = /(?:código|code|confirmación|verific|acceso|passcode|security|único|pin).{0,200}?\b(\d{6,8})\b/i;
+    const afterMatch = searchContext.match(afterRegex);
+    if (afterMatch && !isInvalidCode(afterMatch[1])) {
+        foundCode = afterMatch[1];
+    }
+
+    // 2. Precise Proximity Match (Code BEFORE keyword)
+    if (!foundCode) {
+        const beforeRegex = /\b(\d{6,8})\b.{0,60}?(?:código|code|confirmación|verific|es tu|is your)/i;
+        const beforeMatch = searchContext.match(beforeRegex);
+        if (beforeMatch && !isInvalidCode(beforeMatch[1])) {
+            foundCode = beforeMatch[1];
+        }
+    }
+
+    // 3. Fallback for spaced codes (Netflix: 1 2 3 4 5 6)
+    if (!foundCode) {
+        const spacedMatch = searchContext.match(/(?:código|code|confirmación|verific).{0,100}?\b((\d\s*){6,8})\b/i);
+        if (spacedMatch) {
+            const joined = spacedMatch[1].replace(/\s+/g, '');
+            if (!isInvalidCode(joined)) foundCode = joined;
+        }
+    }
+
+    // 4. Final Fallback: If email subject screams "code", grab the first valid 6-8 digit number
+    if (!foundCode && /(código|code|verific|acceso|inicio|sesión|login)/i.test(subject)) {
+        const allNums = searchContext.match(/\b\d{6,8}\b/g) || [];
+        const valid = allNums.find(n => !isInvalidCode(n));
+        if (valid) foundCode = valid;
+    }
+
+    // Smart Summary
+    let displaySnippet = msg.snippet;
+    const lowerSub = subject.toLowerCase();
+    if (lowerSub.includes('hogar') || lowerSub.includes('viaje') || lowerSub.includes('dispositivo')) {
+        const netflixMatch = content.match(/([A-Z][a-z]+) ha enviado una solicitud desde el dispositivo (.*?)(?= a las| \r|\n|$)/);
+        if (netflixMatch) {
+            displaySnippet = `<strong>${netflixMatch[1]}</strong> solicitó acceso desde <strong>${netflixMatch[2]}</strong>`;
+        } else {
+            const deviceMatch = content.match(/Dispositivo\s*[\r\n]+\s*(.*?)(?=[\r\n]|$)/i);
+            if (deviceMatch) displaySnippet = `Nuevo acceso en: <strong>${deviceMatch[1]}</strong>`;
+        }
+    }
+
+    const mainAction = findMainAction(content, isHtml);
 
     const item = document.createElement('div');
     item.className = 'email-item';
     item.onclick = (e) => {
-        // Only toggle if we didn't click a button or link
-        if (!e.target.closest('button') && !e.target.closest('a')) {
-            const btn = item.querySelector('.toggle-control');
-            toggleBody(msg.id, btn, isHtml);
+        if (!e.target.closest('a') && !e.target.closest('.copy-mini')) {
+            toggleBody(item);
         }
     };
     
     let highlightHtml = '';
-    
-    // 1. Show Code if found
     if (foundCode) {
         highlightHtml += `
             <div class="code-box">
@@ -185,39 +243,41 @@ async function renderEmail(msg) {
         `;
     }
 
-    // 2. Show Main Action button if found
     if (mainAction) {
+        const isNetflixConfirm = mainAction.label === 'SÍ, LO SOLICITÉ YO';
+        const btnColor = isNetflixConfirm ? '#e50914' : 'var(--green)';
+        const btnShadow = isNetflixConfirm ? 'rgba(229,9,20,0.4)' : 'var(--green-glow)';
+
         highlightHtml += `
-            <a href="${mainAction.url}" target="_blank" class="btn-submit" onclick="event.stopPropagation()" style="display:block; text-align:center; text-decoration:none; margin-top:10px; background:var(--green); font-size:0.8rem; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px var(--green-glow);">
+            <a href="${mainAction.url}" target="_blank" class="btn-submit" onclick="event.stopPropagation()" style="display:block; text-align:center; text-decoration:none; margin-top:10px; background:${btnColor}; font-size:0.8rem; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px ${btnShadow}; color: #000;">
                 ${mainAction.label.toUpperCase()}
             </a>
         `;
     }
 
     item.innerHTML = `
-        <div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:4px; display:flex; justify-content:space-between; letter-spacing:0.02em; pointer-events:none;">
-            <span style="font-weight:600; color:var(--text-dim);">${from.split('<')[0].trim() || from}</span>
-            <span>${date}</span>
+        <div style="font-size:0.8rem; color:var(--text); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; pointer-events:none;">
+            <span style="font-weight:700; color:var(--green); letter-spacing:0.01em;">${from.split('<')[0].trim() || from}</span>
+            <span style="font-weight:600; background:rgba(255,255,255,0.06); padding:4px 10px; border-radius:10px; font-size:0.75rem; color:var(--text-dim);">${date}</span>
         </div>
         <div class="email-subject" style="pointer-events:none;">${subject}</div>
-        <div class="email-snippet" style="pointer-events:none;">${msg.snippet}</div>
         
-        ${highlightHtml}
-        
-        <div class="email-meta" style="margin-top:12px;">
-            <button onclick="event.stopPropagation(); toggleBody('${msg.id}', this, ${isHtml})" class="btn-view toggle-control" style="width:100%; border:1px solid var(--border); border-radius:10px; padding:10px; background:rgba(255,255,255,0.02); font-size:0.8rem; font-weight:600; pointer-events:auto;">Ver contenido completo</button>
+        <div class="card-summary">
+            <div class="email-snippet" style="pointer-events:none;">${displaySnippet}</div>
+            ${highlightHtml}
         </div>
-
-        <div id="body-container-${msg.id}" class="msg-body" style="background:#fff; padding:0; overflow:hidden; border-radius:12px; margin-top:12px;">
+        
+        <div class="msg-body" style="display:none; transition: all 0.3s; margin-top:10px; background:#fff; border-radius:12px; overflow:hidden;">
             ${isHtml ? 
-                `<iframe id="iframe-${msg.id}" style="width:100%; border:none; background:#fff; min-height:400px; display:block;"></iframe>` : 
+                `<iframe id="iframe-${msg.id}" style="width:100%; border:none; background:#fff; min-height:500px; display:block;"></iframe>` : 
                 `<div style="padding:16px; color:#333; background:#fff;">${formatBodyWithLinks(content)}</div>`
             }
         </div>
+        <div class="card-indicator">▼</div>
     `;
+
     resultsContainer.appendChild(item);
 
-    // If it's HTML, we need to write to the iframe after it's in the DOM
     if (isHtml) {
         const iframe = document.getElementById('iframe-' + msg.id);
         const doc = iframe.contentWindow.document;
@@ -228,10 +288,9 @@ async function renderEmail(msg) {
             <head>
                 <base target="_blank">
                 <style>
-                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 15px; color: #333; line-height: 1.5; background: #fff; }
-                    img { max-width: 100% !important; height: auto !important; display: block; margin: 15px auto; }
-                    a { color: #6366f1; }
-                    table { max-width: 100% !important; border-collapse: collapse; }
+                    body { font-family: sans-serif; margin: 15px; color: #333; line-height: 1.5; background: #fff; }
+                    img { max-width: 100% !important; height: auto !important; }
+                    a { color: #128c7e; }
                 </style>
             </head>
             <body>${content}</body>
@@ -276,66 +335,33 @@ function formatBodyWithLinks(text) {
     return text.replace(urlPattern, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 
-function toggleBody(id, btn, isHtml) {
-    const el = document.getElementById('body-container-' + id);
-    if (el.style.display === 'block') {
-        el.style.display = 'none';
-        btn.textContent = 'Ver contenido completo';
+function toggleBody(item) {
+    const body = item.querySelector('.msg-body');
+    const summary = item.querySelector('.card-summary');
+    const indicator = item.querySelector('.card-indicator');
+    
+    const isExpanded = body.style.display === 'block';
+
+    if (isExpanded) {
+        body.style.display = 'none';
+        summary.style.display = 'block';
+        indicator.style.transform = 'rotate(0deg)';
     } else {
-        el.style.display = 'block';
-        btn.textContent = 'Ocultar contenido';
-        
-        // Auto-adjust iframe height to show everything
-        if (isHtml) {
-            const iframe = document.getElementById('iframe-' + id);
-            setTimeout(() => {
-                const innerBody = iframe.contentWindow.document.body;
-                iframe.style.height = (innerBody.scrollHeight + 50) + 'px';
-            }, 300);
-        }
+        body.style.display = 'block';
+        summary.style.display = 'none';
+        indicator.style.transform = 'rotate(180deg)';
     }
 }
 
-// Intelligent extractor with Gemini AI
-async function analyzeWithGemini(snippet, content, key) {
-    try {
-        const prompt = `Analiza este correo (probablemente de una plataforma de streaming o seguridad) y extrae la ACCIÓN MÁS IMPORTANTE (link y etiqueta corta).
-        
-        CONTEXTO: 
-        - Si es Netflix/Disney/HBO y habla de "Nuevo dispositivo" o "Hogar", busca el botón de "Gestionar Hogar" o "Cambiar Contraseña".
-        - Si el correo sugiere "Cambiar contraseña de inmediato" por seguridad, extrae ESE link.
-        - Si es un código de verificación, busca el botón de "Verificar".
-        
-        Email Snippet: ${snippet}
-        Email Body (resumen): ${content.substring(0, 2000)}
-        
-        Responde ÚNICAMENTE en JSON: {"label": "NOMBRE ACCION', "url": "URL_AQUI"}.
-        Si no hay link de acción clara, devuelve null.`;
-
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { responseMimeType: "application/json" }
-            })
-        });
-
-        if (!res.ok) return null;
-        const data = await res.json();
-        const output = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        return JSON.parse(output);
-    } catch (e) { return null; }
-}
-
-// Low-intelligence local fallback
+// Manual extractor based on keywords
 function findMainAction(content, isHtml) {
-    const keywords = [
-        { label: 'Cambiar contraseña', regex: /cambiar contraseña|cambiar la contraseña|change password|reset password/i },
-        { label: 'Restablecer contraseña', regex: /restablecer|recuperar|reset|recover/i },
-        { label: 'Verificar cuenta', regex: /verificar|confirmar|verify|confirm/i },
-        { label: 'Administrar Hogar', regex: /administrar hogar|configurar hogar|manage household/i },
-        { label: 'Ir al sitio', regex: /ir a|visit|access|entrar/i }
+    const rules = [
+        { label: 'SÍ, LO SOLICITÉ YO', regex: /sí, lo solicité yo|sí, he sido yo|confirmar solicitud/i },
+        { label: 'CAMBIAR CONTRASEÑA', regex: /cambi.* contraseña|change password|reset password/i },
+        { label: 'GESTIONAR HOGAR', regex: /administrar hogar|configurar hogar|manage household|gestion de hogar/i },
+        { label: 'GESTIONAR ACCESO', regex: /gestionar el acceso|comprueba qué dispositivos|manage access/i },
+        { label: 'VERIFICAR CUENTA', regex: /verificar cuenta|confirmar correo|verify account|confirm email/i },
+        { label: 'REESTABLECER', regex: /restablecer|recuperar|reset|recover/i }
     ];
 
     if (isHtml) {
@@ -343,22 +369,21 @@ function findMainAction(content, isHtml) {
         const doc = parser.parseFromString(content, 'text/html');
         const links = Array.from(doc.querySelectorAll('a'));
         
-        for (const kw of keywords) {
-            // Priority: links whose text matches keywords
-            const match = links.find(l => kw.regex.test(l.innerText) || kw.regex.test(l.title));
+        for (const rule of rules) {
+            // Priority: link text or title matches rule
+            const match = links.find(l => rule.regex.test(l.innerText) || rule.regex.test(l.title));
             if (match && match.href.startsWith('http')) {
-                return { label: kw.label, url: match.href };
+                return { label: rule.label, url: match.href };
             }
         }
     } else {
         const lines = content.split('\n');
-        for (const kw of keywords) {
-            const lineIdx = lines.findIndex(l => kw.regex.test(l));
+        for (const rule of rules) {
+            const lineIdx = lines.findIndex(l => rule.regex.test(l));
             if (lineIdx !== -1) {
-                // Find next link in immediate vicinity
-                for (let i = lineIdx; i < Math.min(lineIdx + 5, lines.length); i++) {
+                for (let i = lineIdx; i < Math.min(lineIdx + 6, lines.length); i++) {
                     const linkMatch = lines[i].match(/(https?:\/\/[^\s]+)/);
-                    if (linkMatch) return { label: kw.label, url: linkMatch[0] };
+                    if (linkMatch) return { label: rule.label, url: linkMatch[0] };
                 }
             }
         }
@@ -388,19 +413,15 @@ function showToast(text, type = 'error') {
 
 function saveConfigs() {
     const cid = clientIdInput.value.trim();
-    const gkey = geminiKeyInput.value.trim();
     if (cid) localStorage.setItem(SK_CID, cid);
-    if (gkey) localStorage.setItem(SK_GEMINI, gkey);
     banner.style.display = 'none';
-    showToast('Configuración guardada', 'success');
+    showToast('Configuracion guardada', 'success');
     if (window.google) initTokenClient();
 }
 
 function clearConfigs() {
     localStorage.removeItem(SK_CID);
-    localStorage.removeItem(SK_GEMINI);
     clientIdInput.value = '';
-    geminiKeyInput.value = '';
     showToast('Configuración eliminada', 'error');
 }
 
@@ -416,11 +437,9 @@ document.addEventListener('DOMContentLoaded', () => {
     authText = document.getElementById('authStatus');
     banner = document.getElementById('config-banner');
     clientIdInput = document.getElementById('clientIdInput');
-    geminiKeyInput = document.getElementById('geminiKeyInput');
 
     document.getElementById('showOrigin').textContent = location.origin;
     clientIdInput.value = getSavedClientId();
-    geminiKeyInput.value = getSavedGeminiKey();
     
     // Check local session
     if (isTokenValid()) {

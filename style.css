@@ -4,11 +4,11 @@
     --surface2: #0b0d0e;
     --border: #1e2225;
     --border2: #252a2d;
-    --accent: #ffffff;
-    --accent-glow: rgba(255, 255, 255, 0.1);
-    --green: #3d9e68;
-    --green-dim: #2a6e49;
-    --green-glow: rgba(61, 158, 104, 0.12);
+    --accent: #128c7e; /* Darker WhatsApp Green */
+    --accent-glow: rgba(18, 140, 126, 0.4);
+    --green: #128c7e;
+    --green-dim: #075e54;
+    --green-glow: rgba(18, 140, 126, 0.15);
     --text: #ffffff;
     --text-dim: #999999;
     --text-muted: #555555;
@@ -67,16 +67,24 @@ body {
 
 /* Auth Card & Main Card */
 #main-search-card {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 16px;
+    max-width: 800px;
+    width: 100%;
+    margin: 0 auto;
 }
 
-@media (min-width: 768px) {
-    #main-search-card {
-        grid-template-columns: 320px 1fr;
-        align-items: start;
-    }
+#searchForm {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+}
+
+#searchForm .field { flex: 1; }
+
+@media (max-width: 600px) {
+    #searchForm { flex-direction: column; align-items: stretch; }
 }
 
 .card {
@@ -157,46 +165,85 @@ body {
 .btn-clear { background: transparent; color: var(--danger); border: 1px solid rgba(255, 68, 68, 0.2) !important; }
 .btn-clear:hover { background: rgba(255, 68, 68, 0.05); }
 
-/* Auth Button */
+/* Ultra-Minimalist Corner Auth */
+#authCard {
+    position: fixed;
+    top: 15px;
+    right: 15px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
 #authBtn {
-    width: 100%;
-    background: #fff;
-    color: #000;
-    border: none;
-    padding: 14px;
-    font-size: 0.9rem;
-    font-weight: 600;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.05);
+    padding: 8px;
+    border-radius: 50%;
     cursor: pointer;
-    border-radius: 12px;
+    transition: all 0.2s;
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    margin-bottom: 12px;
-    transition: all 0.2s;
 }
 
-#authBtn:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(255, 255, 255, 0.1); }
-#authBtn svg { width: 20px; height: 20px; }
+#authBtn:hover { 
+    background: rgba(255,255,255,0.1);
+    transform: scale(1.1);
+}
+
+#authBtn svg { width: 18px; height: 18px; }
 
 .auth-status {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    margin-bottom: 8px;
-}
-
-.auth-status.connected { color: var(--green); }
-
-.auth-config-link {
-    font-size: 0.7rem;
+    position: absolute;
+    right: 48px;
+    top: 0px;
+    font-size: 0.65rem;
     color: var(--text-muted);
-    text-decoration: underline;
-    background: none;
-    border: none;
-    cursor: pointer;
-    display: block;
-    margin: 8px auto 0;
+    opacity: 0;
+    transition: all 0.2s;
+    background: var(--surface);
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
+
+#authCard:hover .auth-status { opacity: 1; right: 44px; }
+
+.disconnect-btn {
+    background: rgba(255, 68, 68, 0.1);
+    color: var(--danger);
+    border: 1px solid rgba(255, 68, 68, 0.2);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.6rem;
+    cursor: pointer;
+}
+
+.disconnect-btn:hover { background: var(--danger); color: #fff; }
+
+#authCard.connected #authBtn::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 10px;
+    height: 10px;
+    background: var(--green);
+    border-radius: 50%;
+    border: 1.5px solid var(--bg);
+}
+
+.auth-config-link { display: none; }
+
+.auth-config-link { display: none; } /* Hidden by default now */
 
 /* Form */
 .field label {
@@ -217,8 +264,9 @@ body {
 
 input[type="email"] {
     width: 100%;
-    padding: 12px 45px 12px 14px;
-    font-size: 0.9rem;
+    height: 52px;
+    padding: 0 45px 0 16px;
+    font-size: 0.95rem;
     background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -245,23 +293,38 @@ input[type="email"]:focus {
 
 .paste-btn:hover { color: var(--accent); }
 
+#searchForm .btn-submit {
+    margin-top: 0;
+    width: auto;
+    min-width: 180px;
+    height: 52px;
+    padding: 0 24px;
+}
+
 .btn-submit {
     width: 100%;
     margin-top: 14px;
-    padding: 14px;
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: #fff;
-    background: var(--accent);
+    padding: 16px;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #000;
+    background: var(--green);
     border: none;
-    border-radius: 12px;
+    border-radius: 14px;
     cursor: pointer;
-    box-shadow: 0 4px 15px var(--accent-glow);
+    box-shadow: 0 4px 20px var(--green-glow);
     transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }
 
-.btn-submit:hover:not(:disabled) { background: #4f46e5; transform: translateY(-1px); box-shadow: 0 6px 20px var(--accent-glow); }
-.btn-submit:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+.btn-submit:hover:not(:disabled) { 
+    transform: translateY(-2px); 
+    box-shadow: 0 8px 25px var(--green-glow);
+    filter: brightness(1.1);
+}
+
+.btn-submit:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 
 /* Results */
 #resultsContainer {
@@ -275,12 +338,36 @@ input[type="email"]:focus {
     border: 1px solid var(--border);
     border-radius: 18px;
     padding: 16px;
+    position: relative;
+    cursor: pointer;
     animation: slideUp 0.4s cubic-bezier(0, 0, 0.2, 1);
+    transition: box-shadow 0.2s;
 }
 
-@keyframes slideUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+.email-item:hover {
+    box-shadow: 0 5px 20px rgba(0,0,0,0.4);
+}
+
+.card-indicator {
+    position: absolute;
+    bottom: 12px;
+    right: 16px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0.6;
+}
+
+.msg-body iframe {
+    width: 100%;
+    min-height: 500px;
+    border: none;
+    border-radius: 8px;
+}
+
+/* Metadata summary shown before expanding */
+.card-summary {
+    display: block;
 }
 
 .email-subject {
