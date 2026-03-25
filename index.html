@@ -535,18 +535,30 @@
             resultsContainer.innerHTML = '';
 
             try {
-                // 1. Search messages
-                const query = encodeURIComponent(`from:${filter}`);
-                const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=5`, {
+                // 1. Search messages: Broad search to avoid missing anything
+                // search for the email as sender, recipient, or just keyword
+                const queryStr = `${filter}`;
+                const query = encodeURIComponent(queryStr);
+                
+                const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=10`, {
                     headers: { 'Authorization': 'Bearer ' + accessToken }
                 });
 
-                if (listRes.status === 401) { logout(); throw new Error('Sesión expirada'); }
-                if (!listRes.ok) throw new Error('Error buscando correos');
+                if (listRes.status === 401) { logout(); throw new Error('Sesión expirada. Por favor reconecta.'); }
+                if (!listRes.ok) {
+                    const err = await listRes.json();
+                    throw new Error(err.error?.message || 'Error buscando correos');
+                }
 
                 const listData = await listRes.json();
+                
                 if (!listData.messages || listData.messages.length === 0) {
-                    resultsContainer.innerHTML = '<div style="text-align:center; font-size:0.75rem; color:var(--text-dim); padding:20px;">No se encontraron correos.</div>';
+                    resultsContainer.innerHTML = `
+                        <div style="text-align:center; padding:30px;">
+                            <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:10px;">No se encontraron correos para:</div>
+                            <div style="font-size:0.85rem; font-weight:600; color:var(--text);">${filter}</div>
+                            <div style="font-size:0.7rem; color:var(--text-muted); margin-top:20px;">Asegúrate de que el remitente o el contenido use exactamente este correo.</div>
+                        </div>`;
                     setLoading(false);
                     return;
                 }
@@ -569,21 +581,49 @@
 
         function renderEmail(msg) {
             const headers = msg.payload.headers;
-            const subject = headers.find(h => h.name === 'Subject')?.value || '(Sin asunto)';
-            const dateStr = headers.find(h => h.name === 'Date')?.value || '';
+            const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(Sin asunto)';
+            const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
+            const dateStr = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
             const date = new Date(dateStr).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
             
+            // Try to find a verification code (6 digits usually)
+            const codeMatch = msg.snippet.match(/\b\d{5,6}\b/);
+            const foundCode = codeMatch ? codeMatch[0] : null;
+
             const item = document.createElement('div');
             item.className = 'email-item';
+            item.style.position = 'relative';
+            
+            let codeHtml = '';
+            if (foundCode) {
+                codeHtml = `
+                    <div style="margin-top:8px; display:flex; align-items:center; gap:10px; padding:10px; background:rgba(61, 158, 104, 0.1); border-radius:8px; border:1px solid rgba(61, 158, 104, 0.2);">
+                        <span style="font-family:'DM Mono'; font-size:1.1rem; color:var(--green); letter-spacing:2px; font-weight:600;">${foundCode}</span>
+                        <span style="font-size:0.6rem; color:var(--green); text-transform:uppercase;">Código detectado</span>
+                        <button onclick="copyCode('${foundCode}')" style="margin-left:auto; background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:0.9rem;">📋</button>
+                    </div>
+                `;
+            }
+
             item.innerHTML = `
+                <div style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px; display:flex; justify-content:space-between;">
+                    <span>${from.split('<')[0]}</span>
+                    <span>${date}</span>
+                </div>
                 <div class="email-subject">${subject}</div>
                 <div class="email-snippet">${msg.snippet}</div>
-                <div class="email-meta">
-                    <span>${date}</span>
-                    <a href="https://mail.google.com/mail/u/0/#inbox/${msg.id}" target="_blank" class="btn-view">Ver en Gmail</a>
+                ${codeHtml}
+                <div class="email-meta" style="margin-top:8px;">
+                    <a href="https://mail.google.com/mail/u/0/#inbox/${msg.id}" target="_blank" class="btn-view">Abrir Correo completo</a>
                 </div>
             `;
             resultsContainer.appendChild(item);
+        }
+
+        function copyCode(code) {
+            navigator.clipboard.writeText(code)
+                .then(() => showToast('Código copiado: ' + code, 'success'))
+                .catch(() => showToast('Error al copiar', 'error'));
         }
 
         // ─── UI UTILS ──────────────────────────────────────────────────────────────
