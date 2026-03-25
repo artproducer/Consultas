@@ -241,9 +241,23 @@ body {
     border: 1.5px solid var(--bg);
 }
 
-.auth-config-link { display: none; }
+.auth-config-link {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    margin-top: 6px;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
 
-.auth-config-link { display: none; } /* Hidden by default now */
+.auth-config-link:hover {
+    opacity: 1;
+    color: var(--accent);
+}
 
 /* Form */
 .field label {

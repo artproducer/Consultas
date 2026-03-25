@@ -501,6 +501,12 @@ function clearConfigs() {
     showToast('Configuración eliminada', 'error');
 }
 
+function toggleConfig() {
+    if (!banner) return;
+    banner.style.display = (banner.style.display === 'none' || !banner.style.display) ? 'block' : 'none';
+    if (banner.style.display === 'block') banner.scrollIntoView({ behavior: 'smooth' });
+}
+
 // ─── INITIALIZATION ──────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
