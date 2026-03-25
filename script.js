@@ -152,7 +152,7 @@ function renderEmail(msg) {
     const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(Sin asunto)';
     const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
     const dateStr = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
-    const date = new Date(dateStr).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const date = new Date(dateStr).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
     
     const { content, isHtml } = extractBody(msg.payload);
 
