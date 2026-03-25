@@ -22,13 +22,19 @@
             <h1>Consulta <em>Inbox</em></h1>
         </div>
 
-        <!-- OAuth Configuration -->
+        <!-- Intelligence Configuration -->
         <div id="config-banner" style="display:none">
-            <p>Configura tu <strong>Google OAuth Client ID</strong>.<br>Origen: <strong id="showOrigin"></strong></p>
+            <p><strong>Configuración de Inteligencia</strong><br>Origen: <strong id="showOrigin"></strong></p>
+            
+            <label class="config-label">Google OAuth Client ID</label>
             <input type="text" id="clientIdInput" placeholder="XXXXXXXXXXXX.apps.googleusercontent.com">
+            
+            <label class="config-label">Gemini API Key (Opcional para IA)</label>
+            <input type="password" id="geminiKeyInput" placeholder="AIzaSy...">
+            
             <div class="config-actions">
-                <button class="btn-save" onclick="saveClientId()">Guardar</button>
-                <button class="btn-clear" onclick="clearClientId()">Borrar</button>
+                <button class="btn-save" onclick="saveConfigs()">Guardar Todo</button>
+                <button class="btn-clear" onclick="clearConfigs()">Borrar</button>
             </div>
         </div>
 

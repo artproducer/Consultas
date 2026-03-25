@@ -4,16 +4,16 @@
     --surface2: #0b0d0e;
     --border: #1e2225;
     --border2: #252a2d;
-    --accent: #6366f1;
-    --accent-glow: rgba(99, 102, 241, 0.15);
+    --accent: #ffffff;
+    --accent-glow: rgba(255, 255, 255, 0.1);
     --green: #3d9e68;
     --green-dim: #2a6e49;
     --green-glow: rgba(61, 158, 104, 0.12);
-    --text: #d8dce6;
-    --text-dim: #5a6270;
-    --text-muted: #3a4050;
-    --danger: #ef4444;
-    --glass-blur: 16px;
+    --text: #ffffff;
+    --text-dim: #999999;
+    --text-muted: #555555;
+    --danger: #ff4444;
+    --glass-blur: 20px;
 }
 
 * {
@@ -102,41 +102,60 @@ body {
 }
 
 #config-banner p {
-    font-size: 0.75rem;
-    color: #f59e0b;
-    margin-bottom: 10px;
-    line-height: 1.4;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+}
+
+.config-label {
+    display: block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 14px;
+    margin-bottom: 6px;
 }
 
 #config-banner input {
     width: 100%;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    color: #f59e0b;
-    font-size: 0.8rem;
-    padding: 10px;
-    border-radius: 8px;
-    margin-bottom: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 0.85rem;
+    padding: 12px;
+    border-radius: 10px;
+    margin-bottom: 4px;
     outline: none;
+    transition: border-color 0.2s;
+}
+
+#config-banner input:focus {
+    border-color: var(--accent);
 }
 
 .config-actions {
     display: flex;
     gap: 8px;
+    margin-top: 16px;
 }
 
 .config-actions button {
     flex: 1;
-    padding: 8px;
-    font-size: 0.75rem;
+    padding: 10px;
+    font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
-    border-radius: 8px;
+    border-radius: 10px;
     border: none;
+    transition: all 0.2s;
 }
 
-.btn-save { background: #f59e0b; color: #000; }
-.btn-clear { background: transparent; color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4) !important; }
+.btn-save { background: var(--accent); color: #000; }
+.btn-save:hover { opacity: 0.9; }
+.btn-clear { background: transparent; color: var(--danger); border: 1px solid rgba(255, 68, 68, 0.2) !important; }
+.btn-clear:hover { background: rgba(255, 68, 68, 0.05); }
 
 /* Auth Button */
 #authBtn {
