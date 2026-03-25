@@ -4,7 +4,7 @@
  */
 
 // ─── CONFIGURATION ───────────────────────────────────────────────────────────
-const HARDCODED_CLIENT_ID = '340536761168-1p62v96f8669d0qjcliaem6e00i98n4d.apps.googleusercontent.com'; // Pre-filled
+const HARDCODED_CLIENT_ID = 'TU-CLIENT-ID.apps.googleusercontent.com'; // Pre-filled placeholder
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const SK_CID = 'query_client_id';
 const SK_ACCESS = 'query_access_token';
