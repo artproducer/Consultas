@@ -429,30 +429,27 @@ input[type="email"]:focus {
 
 /* Code Display */
 .code-box {
-    margin-top: 10px;
-    display: flex;
+    margin-top: 0;
+    display: inline-flex;
     align-items: center;
     gap: 12px;
-    padding: 14px;
-    background: rgba(61, 158, 104, 0.08);
-    border-radius: 12px;
-    border: 1px solid rgba(61, 158, 104, 0.2);
+    padding: 8px 14px;
+    background: rgba(18, 140, 126, 0.08); /* Deep Whatsapp Green dim */
+    border-radius: 10px;
+    border: 1px solid rgba(18, 140, 126, 0.2);
+    flex-shrink: 0;
 }
 
 .code-value {
     font-family: 'DM Mono', monospace;
-    font-size: 1.3rem;
+    font-size: 1.15rem;
     color: var(--green);
-    letter-spacing: 3px;
-    font-weight: 600;
+    letter-spacing: 2px;
+    font-weight: 700;
 }
 
 .code-label {
-    font-size: 0.65rem;
-    color: var(--green-dim);
-    text-transform: uppercase;
-    font-weight: 700;
-    letter-spacing: 0.05em;
+    display: none;
 }
 
 .copy-mini {

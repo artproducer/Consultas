@@ -111,7 +111,7 @@ async function searchMails() {
     resultsContainer.innerHTML = '';
 
     try {
-        const query = encodeURIComponent(`${filter}`);
+        const query = encodeURIComponent(`${filter} newer_than:3d`);
         const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=10`, {
             headers: { 'Authorization': 'Bearer ' + accessToken }
         });
@@ -212,13 +212,17 @@ function renderEmail(msg) {
     // Smart Summary
     let displaySnippet = msg.snippet;
     const lowerSub = subject.toLowerCase();
-    if (lowerSub.includes('hogar') || lowerSub.includes('viaje') || lowerSub.includes('dispositivo')) {
-        const netflixMatch = content.match(/([A-Z][a-z]+) ha enviado una solicitud desde el dispositivo (.*?)(?= a las| \r|\n|$)/);
-        if (netflixMatch) {
-            displaySnippet = `<strong>${netflixMatch[1]}</strong> solicitó acceso desde <strong>${netflixMatch[2]}</strong>`;
+    if (lowerSub.includes('hogar') || lowerSub.includes('viaje') || lowerSub.includes('dispositivo') || lowerSub.includes('solicitaste')) {
+        const netflixMatch = searchContext.match(/([A-Z][a-z]+) ha enviado una solicitud desde el dispositivo (.*?)(?= a las| \||$)/);
+        const newNetflixMatch = searchContext.match(/Solicitud de (.*?), enviada desde:\s*([^,]+)/i);
+        
+        if (newNetflixMatch) {
+            displaySnippet = `<strong>${newNetflixMatch[1].trim()}</strong> solicitó desde <strong>${newNetflixMatch[2].trim()}</strong>`;
+        } else if (netflixMatch) {
+            displaySnippet = `<strong>${netflixMatch[1].trim()}</strong> solicitó acceso desde <strong>${netflixMatch[2].trim()}</strong>`;
         } else {
-            const deviceMatch = content.match(/Dispositivo\s*[\r\n]+\s*(.*?)(?=[\r\n]|$)/i);
-            if (deviceMatch) displaySnippet = `Nuevo acceso en: <strong>${deviceMatch[1]}</strong>`;
+            const deviceMatch = searchContext.match(/Dispositivo\s*(.*?)(?=\sFecha|\sHora|$)/i);
+            if (deviceMatch) displaySnippet = `Nuevo acceso en: <strong>${deviceMatch[1].trim()}</strong>`;
         }
     }
 
@@ -232,24 +236,25 @@ function renderEmail(msg) {
         }
     };
     
-    let highlightHtml = '';
+    let codeHtml = '';
     if (foundCode) {
-        highlightHtml += `
-            <div class="code-box">
-                <span class="code-value">${foundCode}</span>
-                <span class="code-label">CÓDIGO</span>
-                <button class="copy-mini" onclick="copyToClipboard('${foundCode}', 'Código copiado')">Copiar</button>
+        // Code box is now directly clickable to copy, no extra button needed
+        codeHtml = `
+            <div class="code-box click-to-copy" style="background:rgba(18,140,126,0.3); border:1px solid rgba(18,140,126,0.8); cursor:pointer; display:inline-flex; align-items:center; height:30px; padding:0 12px; border-radius:8px;" title="Clic para copiar" onclick="event.stopPropagation(); copyToClipboard('${foundCode}', 'Código copiado')">
+                <span class="code-value" style="color:#fff; font-size:1.1rem; letter-spacing:3px;">${foundCode}</span>
             </div>
         `;
     }
 
+    let actionHtml = '';
     if (mainAction) {
         const isNetflixConfirm = mainAction.label === 'SÍ, LO SOLICITÉ YO';
         const btnColor = isNetflixConfirm ? '#e50914' : 'var(--green)';
         const btnShadow = isNetflixConfirm ? 'rgba(229,9,20,0.4)' : 'var(--green-glow)';
 
-        highlightHtml += `
-            <a href="${mainAction.url}" target="_blank" class="btn-submit" onclick="event.stopPropagation()" style="display:block; text-align:center; text-decoration:none; margin-top:10px; background:${btnColor}; font-size:0.8rem; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px ${btnShadow}; color: #000;">
+        // Ultra compact action button
+        actionHtml = `
+            <a href="${mainAction.url}" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex; align-items:center; justify-content:center; white-space:nowrap; height:30px; padding:0 12px; background:${btnColor}; border-radius:8px; font-size:0.7rem; font-weight:800; color:#000; text-decoration:none; box-shadow: 0 4px 10px ${btnShadow}; flex-shrink:0;">
                 ${mainAction.label.toUpperCase()}
             </a>
         `;
@@ -263,8 +268,13 @@ function renderEmail(msg) {
         <div class="email-subject" style="pointer-events:none;">${subject}</div>
         
         <div class="card-summary">
-            <div class="email-snippet" style="pointer-events:none;">${displaySnippet}</div>
-            ${highlightHtml}
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:nowrap;">
+                <div class="email-snippet" style="pointer-events:none; margin-bottom:0; flex-grow:1; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${displaySnippet}</div>
+                <div style="display:flex; gap:8px; align-items:center; flex-shrink:0; margin-right:20px;">
+                    ${codeHtml}
+                    ${actionHtml}
+                </div>
+            </div>
         </div>
         
         <div class="msg-body" style="display:none; transition: all 0.3s; margin-top:10px; background:#fff; border-radius:12px; overflow:hidden;">
@@ -356,7 +366,7 @@ function toggleBody(item) {
 // Manual extractor based on keywords
 function findMainAction(content, isHtml) {
     const rules = [
-        { label: 'SÍ, LO SOLICITÉ YO', regex: /sí, lo solicité yo|sí, he sido yo|confirmar solicitud/i },
+        { label: 'SÍ, LO SOLICITÉ YO', regex: /sí, lo solicit[eé] yo|sí, he sido yo|sí, la envi[eé] yo|confirmar solicitud/i },
         { label: 'CAMBIAR CONTRASEÑA', regex: /cambi.* contraseña|change password|reset password/i },
         { label: 'GESTIONAR HOGAR', regex: /administrar hogar|configurar hogar|manage household|gestion de hogar/i },
         { label: 'GESTIONAR ACCESO', regex: /gestionar el acceso|comprueba qué dispositivos|manage access/i },
@@ -458,8 +468,18 @@ window.pasteFromClipboard = function() {
         if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
             filterInput.value = clean;
             showToast('Correo pegado', 'success');
+            searchMails();
         } else {
             showToast('No es un correo válido', 'error');
         }
     }).catch(() => showToast('Permiso denegado', 'error'));
 };
+
+document.getElementById('filterEmail').addEventListener('paste', () => {
+    setTimeout(() => {
+        const clean = filterInput.value.trim();
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+            searchMails();
+        }
+    }, 100);
+});
