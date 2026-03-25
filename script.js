@@ -52,16 +52,16 @@ function handleTokenResponse(res) {
 function onAuthed() {
     const card = document.getElementById('authCard');
     card.classList.add('connected');
-    
+
     authText.textContent = 'Sesión Activa';
-    
+
     // Clicking icon while authed toggles the menu (good for mobile)
     authBtn.onclick = (e) => {
         e.stopPropagation();
         authText.style.opacity = authText.style.opacity === '1' ? '0' : '1';
         authText.style.pointerEvents = authText.style.opacity === '1' ? 'auto' : 'none';
     };
-    
+
     // Put Disconnect inside the status hover area
     if (!authText.querySelector('.disconnect-btn')) {
         const btn = document.createElement('button');
@@ -91,7 +91,7 @@ function isTokenValid() {
 
 async function searchMails() {
     if (isSearching) return;
-    
+
     // Ensure session
     if (!accessToken && isTokenValid()) {
         accessToken = localStorage.getItem(SK_ACCESS);
@@ -111,8 +111,8 @@ async function searchMails() {
     resultsContainer.innerHTML = '';
 
     try {
-        const query = encodeURIComponent(`${filter} newer_than:3d`);
-        const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=10`, {
+        const query = encodeURIComponent(`${filter} newer_than:15d`);
+        const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=30`, {
             headers: { 'Authorization': 'Bearer ' + accessToken }
         });
 
@@ -120,7 +120,7 @@ async function searchMails() {
         if (!listRes.ok) throw new Error('Error buscando correos');
 
         const listData = await listRes.json();
-        
+
         if (!listData.messages || listData.messages.length === 0) {
             resultsContainer.innerHTML = `
                 <div style="text-align:center; padding:40px; border-radius:18px; border:1px dashed var(--border);">
@@ -153,71 +153,105 @@ function renderEmail(msg) {
     const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
     const dateStr = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
     const date = new Date(dateStr).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
-    
+
     const { content, isHtml } = extractBody(msg.payload);
 
     // Advanced Code Detection with DOM Parsing (Disney+, Netflix, etc.)
     let foundCode = null;
     let pureText = content;
-    
+
+    let doc = null;
     // Crucial: DOMParser completely ignores HTML attributes and tags
     if (isHtml) {
         const parser = new DOMParser();
-        const doc = parser.parseFromString(content, 'text/html');
-        
+        doc = parser.parseFromString(content, 'text/html');
+
         // Remove style and script tags which contain code, not text
         doc.querySelectorAll('style, script').forEach(s => s.remove());
-        
+
         pureText = doc.body.textContent || "";
     }
-    
+
     // Normalize text: remove tabs, newlines and extra spaces
     const searchContext = `${subject} | ${msg.snippet} | ${pureText}`.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ');
 
-    const isInvalidCode = (c) => {
+    const isInvalidCode = (c, context, raw = null) => {
         if (/^(202[4-9]|2030)$/.test(c)) return true; // Common years
-        if (/^(\d)\1+$/.test(c)) return true; // Kills '000000', '777777', etc.
-        if (/^(91521|95032|1050)$/.test(c)) return true; // Disney/Netflix explicit zip/buildings
+        if (/^[0-9]{5}$/.test(c)) return true; // ZIP codes
+        if (/^(.)\1+$/.test(c)) return true; // Repeated digits (0000)
+        if (c.includes('1570') || c.startsWith('01800')) return true; // Netflix/Support phone fragments
+
+        // Use raw (spaced) version if provided to find correct position in context
+        const searchStr = raw || c;
+        const pos = context.indexOf(searchStr);
+        if (pos === -1) return false;
+
+        const lookbehind = context.substring(Math.max(0, pos - 50), pos).toLowerCase();
+        const lookahead = context.substring(pos + searchStr.length, Math.min(context.length, pos + searchStr.length + 30)).toLowerCase();
+
+        if (lookbehind.includes('llama') || lookbehind.includes('llámanos') || lookbehind.includes('tel') || lookbehind.includes('phone') || lookbehind.includes('01 800') || lookbehind.includes('800')) return true;
+        if (lookahead.includes('way') || lookahead.includes('ave') || lookahead.includes('st') || lookahead.includes('calle') || lookahead.includes('road')) return true;
+
+        // Check for common footer terms around the code to avoid 1570121-like leaks
+        const footerTerms = ['derechos reservados', 'unsubscribe', 'privacidad', 'términos', 'copyright', 'inc.', 'privacy'];
+        const contextAroundCode = context.substring(Math.max(0, pos - 150), Math.min(context.length, pos + searchStr.length + 150)).toLowerCase();
+        if (footerTerms.some(term => contextAroundCode.includes(term))) return true;
+
         return false;
     };
 
-    // 1. Precise Proximity Match (Code AFTER keyword - up to 200 chars away)
-    // ONLY looks for 6 to 8 digits (ignores 5-digit Zip codes like 91521 entirely)
-    const afterRegex = /(?:código|code|confirmación|verific|acceso|passcode|security|único|pin).{0,200}?\b(\d{6,8})\b/i;
+    // 0. HTML Specific Search (High Confidence)
+    if (isHtml) {
+        const potentialCodes = Array.from(doc.querySelectorAll('td, span, div, b, strong, font'))
+            .filter(el => {
+                const txt = el.textContent.trim().replace(/\s+/g, '');
+                const style = el.getAttribute('style') || '';
+                const cls = el.className || '';
+                // Look for common code classes or letter-spacing
+                return (cls.includes('number') || cls.includes('code') || style.includes('letter-spacing')) && /^\d{4,8}$/.test(txt);
+            });
+        if (potentialCodes.length > 0) {
+            foundCode = potentialCodes[0].textContent.trim().replace(/\s+/g, '');
+        }
+    }
+
+    // 1. Proximity Match: Code AFTER keyword (High Priority)
+    const afterRegex = /(?:código|code|confirmación|verific|acceso|pin|confirma|cambio).{0,400}?\b(\d{4,8})\b/i;
     const afterMatch = searchContext.match(afterRegex);
-    if (afterMatch && !isInvalidCode(afterMatch[1])) {
+    if (afterMatch && !foundCode && !isInvalidCode(afterMatch[1], searchContext)) {
         foundCode = afterMatch[1];
     }
 
-    // 2. Precise Proximity Match (Code BEFORE keyword)
+    // 2. Proximity Match: Code BEFORE keyword
     if (!foundCode) {
-        const beforeRegex = /\b(\d{6,8})\b.{0,60}?(?:código|code|confirmación|verific|es tu|is your)/i;
+        const beforeRegex = /\b(\d{4,8})\b.{0,60}?(?:código|code|confirmación|verific|es tu|is tu|confirma)/i;
         const beforeMatch = searchContext.match(beforeRegex);
-        if (beforeMatch && !isInvalidCode(beforeMatch[1])) {
+        if (beforeMatch && !isInvalidCode(beforeMatch[1], searchContext)) {
             foundCode = beforeMatch[1];
         }
     }
 
-    // 3. Fallback for spaced codes (Netflix: 1 2 3 4 5 6)
+    // 3. Fallback for spaced codes (Netflix: 1 2 3 4)
     if (!foundCode) {
-        const spacedMatch = searchContext.match(/(?:código|code|confirmación|verific).{0,100}?\b((\d\s*){6,8})\b/i);
+        const spacedMatch = searchContext.match(/(?:código|code|confirmación|verific|confirma|cambio).{0,250}?\b((\d\s*){4,8})\b/i);
         if (spacedMatch) {
-            const joined = spacedMatch[1].replace(/\s+/g, '');
-            if (!isInvalidCode(joined)) foundCode = joined;
+            const rawCode = spacedMatch[1];
+            const joined = rawCode.replace(/\s+/g, '');
+            if (joined.length >= 4 && !isInvalidCode(joined, searchContext, rawCode)) foundCode = joined;
         }
     }
 
-    // 4. Final Fallback: If email subject screams "code", grab the first valid 6-8 digit number
-    if (!foundCode && /(código|code|verific|acceso|inicio|sesión|login)/i.test(subject)) {
-        const allNums = searchContext.match(/\b\d{6,8}\b/g) || [];
-        const valid = allNums.find(n => !isInvalidCode(n));
+    // 4. Final Fallback: If email subject screams "code", grab the first valid 4-8 digit number
+    if (!foundCode && /(código|code|verific|acceso|inicio|sesión|login|confirma|cambio)/i.test(subject)) {
+        const allNums = searchContext.match(/\b\d{4,8}\b/g) || [];
+        const valid = allNums.find(n => !isInvalidCode(n, searchContext));
         if (valid) foundCode = valid;
     }
 
     // Smart Summary
     let displaySnippet = msg.snippet;
     const lowerSub = subject.toLowerCase();
-    
+
     // Protection/Security alerts (Crunchyroll, Google, Vix, etc.)
     if (lowerSub.includes('accedida') || lowerSub.includes('inicio de sesión') || lowerSub.includes('inicia sesión') || lowerSub.includes('seguridad') || lowerSub.includes('verific') || lowerSub.includes('contraseña')) {
         // Strict regex for Geography (excludes CSS media query leaks)
@@ -226,25 +260,33 @@ function renderEmail(msg) {
 
         if (accountMatch) {
             displaySnippet = `Verificando cuenta: <strong>${accountMatch[1].trim()}</strong>`;
-        } else if (locationMatch) {
+        } else if (locationMatch && locationMatch[1].includes(',')) {
             displaySnippet = `Inicio detectado en: <strong>${locationMatch[1].trim()}</strong>`;
         } else if (lowerSub.includes('contraseña') || lowerSub.includes('password')) {
             displaySnippet = `Actualización de seguridad confirmada`;
+        } else if (lowerSub.includes('verific')) {
+            displaySnippet = `Confirmación: <strong>Escribe el código para validar</strong>`;
         }
     }
 
     // Household/Access/Invitation specific logic (Netflix, Vix, etc.)
-    if (lowerSub.includes('hogar') || lowerSub.includes('viaje') || lowerSub.includes('dispositivo') || lowerSub.includes('solicitaste') || lowerSub.includes('vix') || lowerSub.includes('unirse')) {
-        const netflixMatch = searchContext.match(/([A-Z][a-z]+) ha enviado una solicitud desde el dispositivo (.*?)(?= a las| \||$)/);
+    if (lowerSub.includes('hogar') || lowerSub.includes('viaje') || lowerSub.includes('dispositivo') || lowerSub.includes('solicitaste') || lowerSub.includes('vix') || lowerSub.includes('unirse') || lowerSub.includes('tienes') || lowerSub.includes('inicio') || lowerSub.includes('temporal')) {
+        const netflixMatch = searchContext.match(/(\w+) ha enviado una solicitud desde (?:el dispositivo )?([^|]+?)(?= a las| \||$)/i);
         const newNetflixMatch = searchContext.match(/Solicitud de (.*?), enviada desde:\s*([^,]+)/i);
-        const inviteMatch = searchContext.match(/([A-Z][a-z]+) te ha invitado(?: [^ ]+){0,5} a (?:unirse|su plan)/i);
-        
-        if (inviteMatch) {
+        const inviteMatch = searchContext.match(/(\w+) te ha invitado(?: [^ ]+){0,5} a (?:unirse|su plan)/i);
+        const deviceMatch = searchContext.match(/([A-Z][a-z0-9 ]+-[^|]+)/i) || searchContext.match(/([A-Z][a-z]+ Smart TV|Samsung|LG|Apple TV|Roku)/i);
+
+        if (subject.includes('Solicitud de inicio') || subject.includes('solicitud de inicio')) {
+            const dev = deviceMatch ? deviceMatch[1].trim() : 'Dispositivo';
+            displaySnippet = `Aprobar acceso: <strong>${dev}</strong>`;
+        } else if (subject.includes('¡Casi lo tienes!')) {
+            displaySnippet = `Suscripción pendiente: <strong>Crea tu cuenta ahora</strong>`;
+        } else if (inviteMatch) {
             displaySnippet = `Invitación de: <strong>${inviteMatch[1].trim()}</strong>`;
         } else if (newNetflixMatch) {
             displaySnippet = `<strong>${newNetflixMatch[1].trim()}</strong> solicitó desde <strong>${newNetflixMatch[2].trim()}</strong>`;
         } else if (netflixMatch) {
-            displaySnippet = `<strong>${netflixMatch[1].trim()}</strong> solicitó acceso desde <strong>${netflixMatch[2].trim()}</strong>`;
+            displaySnippet = `<strong>${netflixMatch[1].trim()}</strong> solicitó desde <strong>${netflixMatch[2].trim()}</strong>`;
         } else if (!displaySnippet.includes('Inicio detectado') && !displaySnippet.includes('Verificando')) {
             const deviceMatch = searchContext.match(/Dispositivo\s*(.*?)(?=\sFecha|\sHora|$)/i);
             if (deviceMatch) displaySnippet = `Nuevo acceso en: <strong>${deviceMatch[1].trim()}</strong>`;
@@ -260,7 +302,7 @@ function renderEmail(msg) {
     }
 
     let mainAction = findMainAction(content, isHtml);
-    
+
     // If body was empty, force a "Copy Email" action
     if (useFromAction && !mainAction) {
         const emailOnly = from.match(/[^ <]+@[^ >]+/);
@@ -276,7 +318,7 @@ function renderEmail(msg) {
             toggleBody(item);
         }
     };
-    
+
     let codeHtml = '';
     if (foundCode) {
         // Code box is now directly clickable to copy, no extra button needed
@@ -293,14 +335,17 @@ function renderEmail(msg) {
         const isBilling = mainAction.label === 'GESTIONAR PAGO';
         const isRenew = mainAction.label === 'RENOVAR';
         const isLogin = mainAction.label === 'INICIAR SESIÓN';
+        const isCreate = mainAction.label === 'CREAR CUENTA';
+        const isApprove = mainAction.label === 'APROBAR INICIO';
+        const isRequest = mainAction.label === 'SOLICITAR CÓDIGO';
         const isCopy = mainAction.isCopyEmail;
-        
+
         let btnColor = 'var(--green)';
         let btnShadow = 'var(--green-glow)';
         let txtColor = '#000';
         let clickAction = `event.stopPropagation()`;
 
-        if (mainAction.label === 'SÍ, LO SOLICITÉ YO' || mainAction.label === 'ACEPTAR INVITACIÓN') {
+        if (mainAction.label === 'SÍ, LO SOLICITÉ YO' || mainAction.label === 'ACEPTAR INVITACIÓN' || isCreate || isApprove || isRequest) {
             btnColor = '#e50914'; // Netflix Red
             btnShadow = 'rgba(229,9,20,0.4)';
         } else if (isProtection) {
@@ -350,10 +395,10 @@ function renderEmail(msg) {
         </div>
         
         <div class="msg-body" style="display:none; transition: all 0.3s; margin-top:10px; background:#fff; border-radius:12px; overflow:hidden;">
-            ${isHtml ? 
-                `<iframe id="iframe-${msg.id}" style="width:100%; border:none; background:#fff; min-height:500px; display:block;"></iframe>` : 
-                `<div style="padding:16px; color:#333; background:#fff;">${formatBodyWithLinks(content)}</div>`
-            }
+            ${isHtml ?
+            `<iframe id="iframe-${msg.id}" style="width:100%; border:none; background:#fff; min-height:500px; display:block;"></iframe>` :
+            `<div style="padding:16px; color:#333; background:#fff;">${formatBodyWithLinks(content)}</div>`
+        }
         </div>
         <div class="card-indicator">▼</div>
     `;
@@ -394,12 +439,12 @@ function extractBody(payload) {
         if (p.mimeType === 'text/plain') plainPart = p.body.data;
         if (p.parts) p.parts.forEach(findParts);
     }
-    
+
     findParts(payload);
 
     if (htmlPart) return { content: decodeB64(htmlPart), isHtml: true };
     if (plainPart) return { content: decodeB64(plainPart), isHtml: false };
-    
+
     return { content: 'Cuerpo del mensaje no disponible.', isHtml: false };
 }
 
@@ -421,7 +466,7 @@ function toggleBody(item) {
     const body = item.querySelector('.msg-body');
     const summary = item.querySelector('.card-summary');
     const indicator = item.querySelector('.card-indicator');
-    
+
     const isExpanded = body.style.display === 'block';
 
     if (isExpanded) {
@@ -439,9 +484,12 @@ function toggleBody(item) {
 function findMainAction(content, isHtml) {
     const rules = [
         { label: 'SÍ, LO SOLICITÉ YO', regex: /sí, lo solicit[eé] yo|sí, he sido yo|sí, la envi[eé] yo|confirmar solicitud/i },
+        { label: 'APROBAR INICIO', regex: /aprobar inicio|aprobar acceso|approve login/i },
+        { label: 'VERIFICAR CUENTA', regex: /verificar cuenta|confirmar correo|verificar correo electr[oó]nico|verify account|confirm email/i },
         { label: 'ACEPTAR INVITACIÓN', regex: /comenzar|unirse|aceptar invitaci[oó]n|get started/i },
         { label: 'INICIAR SESIÓN', regex: /inicia[r]? sesi[oó]n|log[ -]?in|acceder|sign[ -]?in|mi cuenta/i },
-        { label: 'RENOVAR', regex: /renew|renovar|expir[ae]|vence/i },
+        { label: 'CREAR CUENTA', regex: /crea[r]? cuenta|iniciar mi membres[ií]a|sign[ -]?up|create account/i },
+        { label: 'SOLICITAR CÓDIGO', regex: /solicitar c[oó]digo|get code|enviar c[oó]digo/i },
         { label: 'PROTEGER CUENTA', regex: /esto no fui yo|not me|security alert|seguridad/i },
         { label: 'GESTIONAR PAGO', regex: /actualizar método|método de pago|update payment|billing|pago/i },
         { label: 'CAMBIAR CONTRASEÑA', regex: /cambi.* contraseña|change password|reset password/i },
@@ -455,7 +503,7 @@ function findMainAction(content, isHtml) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(content, 'text/html');
         const links = Array.from(doc.querySelectorAll('a'));
-        
+
         for (const rule of rules) {
             const match = links.find(l => {
                 const text = (l.textContent || l.innerText || '').trim();
@@ -537,19 +585,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('showOrigin').textContent = location.origin;
     clientIdInput.value = getSavedClientId();
-    
+
     // Check local session
     if (isTokenValid()) {
         accessToken = localStorage.getItem(SK_ACCESS);
         onAuthed();
     }
-    
+
     // Load GIS
     if (window.google) initTokenClient();
 });
 
 // Helper for UI paste
-window.pasteFromClipboard = function() {
+window.pasteFromClipboard = function () {
     navigator.clipboard.readText().then(text => {
         const clean = text.trim();
         if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
