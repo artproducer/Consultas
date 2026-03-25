@@ -218,8 +218,8 @@ function renderEmail(msg) {
     let displaySnippet = msg.snippet;
     const lowerSub = subject.toLowerCase();
     
-    // Protection/Security alerts (Crunchyroll, Google, etc.)
-    if (lowerSub.includes('accedida') || lowerSub.includes('inicio de sesión') || lowerSub.includes('seguridad') || lowerSub.includes('verific')) {
+    // Protection/Security alerts (Crunchyroll, Google, Vix, etc.)
+    if (lowerSub.includes('accedida') || lowerSub.includes('inicio de sesión') || lowerSub.includes('inicia sesión') || lowerSub.includes('seguridad') || lowerSub.includes('verific') || lowerSub.includes('contraseña')) {
         // Strict regex for Geography (excludes CSS media query leaks)
         const locationMatch = searchContext.match(/(?:Cerca de|Cerca|En)\s+(?!(?:and|min|max|width))\b([^,\|]{3,50}, [^,\|]{3,50}(?:, [^,\|]{3,50})?)/i);
         const accountMatch = searchContext.match(/(?:Cuenta de Google|la cuenta)\s+([^\s]+@gmail\.com)/i);
@@ -228,15 +228,20 @@ function renderEmail(msg) {
             displaySnippet = `Verificando cuenta: <strong>${accountMatch[1].trim()}</strong>`;
         } else if (locationMatch) {
             displaySnippet = `Inicio detectado en: <strong>${locationMatch[1].trim()}</strong>`;
+        } else if (lowerSub.includes('contraseña') || lowerSub.includes('password')) {
+            displaySnippet = `Actualización de seguridad confirmada`;
         }
     }
 
-    // Household/Netflix specific logic
-    if (lowerSub.includes('hogar') || lowerSub.includes('viaje') || lowerSub.includes('dispositivo') || lowerSub.includes('solicitaste')) {
+    // Household/Access/Invitation specific logic (Netflix, Vix, etc.)
+    if (lowerSub.includes('hogar') || lowerSub.includes('viaje') || lowerSub.includes('dispositivo') || lowerSub.includes('solicitaste') || lowerSub.includes('vix') || lowerSub.includes('unirse')) {
         const netflixMatch = searchContext.match(/([A-Z][a-z]+) ha enviado una solicitud desde el dispositivo (.*?)(?= a las| \||$)/);
         const newNetflixMatch = searchContext.match(/Solicitud de (.*?), enviada desde:\s*([^,]+)/i);
+        const inviteMatch = searchContext.match(/([A-Z][a-z]+) te ha invitado(?: [^ ]+){0,5} a (?:unirse|su plan)/i);
         
-        if (newNetflixMatch) {
+        if (inviteMatch) {
+            displaySnippet = `Invitación de: <strong>${inviteMatch[1].trim()}</strong>`;
+        } else if (newNetflixMatch) {
             displaySnippet = `<strong>${newNetflixMatch[1].trim()}</strong> solicitó desde <strong>${newNetflixMatch[2].trim()}</strong>`;
         } else if (netflixMatch) {
             displaySnippet = `<strong>${netflixMatch[1].trim()}</strong> solicitó acceso desde <strong>${netflixMatch[2].trim()}</strong>`;
@@ -287,6 +292,7 @@ function renderEmail(msg) {
         const isProtection = mainAction.label === 'PROTEGER CUENTA';
         const isBilling = mainAction.label === 'GESTIONAR PAGO';
         const isRenew = mainAction.label === 'RENOVAR';
+        const isLogin = mainAction.label === 'INICIAR SESIÓN';
         const isCopy = mainAction.isCopyEmail;
         
         let btnColor = 'var(--green)';
@@ -294,7 +300,7 @@ function renderEmail(msg) {
         let txtColor = '#000';
         let clickAction = `event.stopPropagation()`;
 
-        if (mainAction.label === 'SÍ, LO SOLICITÉ YO') {
+        if (mainAction.label === 'SÍ, LO SOLICITÉ YO' || mainAction.label === 'ACEPTAR INVITACIÓN') {
             btnColor = '#e50914'; // Netflix Red
             btnShadow = 'rgba(229,9,20,0.4)';
         } else if (isProtection) {
@@ -307,6 +313,9 @@ function renderEmail(msg) {
         } else if (isRenew) {
             btnColor = '#00c9db'; // CapCut Cyan
             btnShadow = 'rgba(0,201,219,0.4)';
+        } else if (isLogin) {
+            btnColor = '#f35400'; // Vix Orange
+            btnShadow = 'rgba(243,84,0,0.4)';
         } else if (isCopy) {
             btnColor = '#3498db'; // Google Blue
             btnShadow = 'rgba(52,152,219,0.4)';
@@ -430,6 +439,8 @@ function toggleBody(item) {
 function findMainAction(content, isHtml) {
     const rules = [
         { label: 'SÍ, LO SOLICITÉ YO', regex: /sí, lo solicit[eé] yo|sí, he sido yo|sí, la envi[eé] yo|confirmar solicitud/i },
+        { label: 'ACEPTAR INVITACIÓN', regex: /comenzar|unirse|aceptar invitaci[oó]n|get started/i },
+        { label: 'INICIAR SESIÓN', regex: /inicia[r]? sesi[oó]n|log[ -]?in|acceder|sign[ -]?in|mi cuenta/i },
         { label: 'RENOVAR', regex: /renew|renovar|expir[ae]|vence/i },
         { label: 'PROTEGER CUENTA', regex: /esto no fui yo|not me|security alert|seguridad/i },
         { label: 'GESTIONAR PAGO', regex: /actualizar método|método de pago|update payment|billing|pago/i },
@@ -446,9 +457,13 @@ function findMainAction(content, isHtml) {
         const links = Array.from(doc.querySelectorAll('a'));
         
         for (const rule of rules) {
-            // Priority: link text or title matches rule
-            const match = links.find(l => rule.regex.test(l.innerText) || rule.regex.test(l.title));
-            if (match && match.href.startsWith('http')) {
+            const match = links.find(l => {
+                const text = (l.textContent || l.innerText || '').trim();
+                const title = (l.getAttribute('title') || l.getAttribute('aria-label') || '').trim();
+                return rule.regex.test(text) || rule.regex.test(title);
+            });
+
+            if (match && match.href && match.href.startsWith('http')) {
                 return { label: rule.label, url: match.href };
             }
         }
