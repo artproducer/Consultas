@@ -2,8 +2,11 @@
  * Consulta Inbox - Netlify Functions + sesion por contrasena
  */
 const NETLIFY_API_BASE = 'https://marvelous-salmiakki-382f32.netlify.app';
-const IS_GITHUB_PAGES = /github\.io$/i.test(window.location.hostname);
-const API_BASE = IS_GITHUB_PAGES ? NETLIFY_API_BASE : '';
+const HOST = window.location.hostname;
+const IS_NETLIFY_HOST = /netlify\.app$/i.test(HOST);
+const IS_LOCAL_HOST = /^(localhost|127\.0\.0\.1)$/i.test(HOST);
+// Si no estamos en Netlify ni en local, usamos backend remoto en Netlify.
+const API_BASE = (IS_NETLIFY_HOST || IS_LOCAL_HOST) ? '' : NETLIFY_API_BASE;
 const LOGIN_ENDPOINT = `${API_BASE}/.netlify/functions/login`;
 const INBOX_ENDPOINT = `${API_BASE}/.netlify/functions/inbox`;
 const LOGOUT_ENDPOINT = `${API_BASE}/.netlify/functions/logout`;
