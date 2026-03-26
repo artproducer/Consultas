@@ -1,21 +1,16 @@
 ﻿/**
- * Consulta Inbox - Apps Script mode (sin OAuth frontend)
- * Mantiene la visual/lógica "pro" del render anterior.
+ * Consulta Inbox - Netlify Functions + sesion por contrasena
  */
-
-const GAS_WEB_APP_URL = '';
-const GAS_SECRET_TOKEN = '';
+const LOGIN_ENDPOINT = '/.netlify/functions/login';
+const INBOX_ENDPOINT = '/.netlify/functions/inbox';
+const LOGOUT_ENDPOINT = '/.netlify/functions/logout';
 const POLL_INTERVAL_MS = 700;
-const SK_GAS_URL = 'query_gas_url';
-const SK_GAS_TOKEN = 'query_gas_token';
-
 let isSearching = false;
 let pollingInterval = null;
 let renderedMessageIds = new Set();
 let latestSeenInternalDate = 0;
 let activeSearchSeq = 0;
 let activeFilterTerm = '';
-
 let resultsContainer;
 let loader;
 let submitBtn;
@@ -25,75 +20,56 @@ let clearFilterBtn;
 let configLogoutBtn;
 let configModal;
 let configLoginForm;
-let configUrlInput;
-let configTokenInput;
+let configPasswordInput;
 let configLoginPromise = null;
-
-function getGasConfig() {
-    const cfg = window.__APP_CONFIG__ || {};
-    const url = (localStorage.getItem(SK_GAS_URL) || cfg.gasUrl || GAS_WEB_APP_URL || '').trim();
-    const token = (localStorage.getItem(SK_GAS_TOKEN) || cfg.gasToken || GAS_SECRET_TOKEN || '').trim();
-    return { url, token };
+async function hasActiveSession() {
+    try {
+        const res = await fetch(`${INBOX_ENDPOINT}?action=ping`, {
+            credentials: 'include'
+        });
+        if (!res.ok) return false;
+        const payload = await res.json();
+        return !!(payload && payload.ok === true && payload.pong === true);
+    } catch (_) {
+        return false;
+    }
 }
-
-async function ensureGasConfigOnFirstVisit() {
-    const current = getGasConfig();
-    if (current.url && current.token) return current;
-
+async function ensureSessionOnFirstVisit() {
+    if (await hasActiveSession()) return true;
     if (configLoginPromise) return configLoginPromise;
-    configLoginPromise = openConfigLogin(current).finally(() => {
+    configLoginPromise = openLoginModal().finally(() => {
         configLoginPromise = null;
     });
     return configLoginPromise;
 }
-
-function openConfigLogin(initial) {
+function openLoginModal() {
     return new Promise((resolve) => {
-        if (!configModal || !configLoginForm || !configUrlInput || !configTokenInput) {
-            resolve(initial || { url: '', token: '' });
+        if (!configModal || !configLoginForm || !configPasswordInput) {
+            resolve(false);
             return;
         }
-
-        const startUrl = initial.url || '';
-        const startToken = initial.token || '';
-        configUrlInput.value = startUrl;
-        configTokenInput.value = startToken;
-        configUrlInput.readOnly = false;
-
+        configPasswordInput.value = '';
         configModal.classList.add('show');
         configModal.setAttribute('aria-hidden', 'false');
         document.body.classList.add('modal-open');
-
-        if (startToken) configTokenInput.focus();
-        else configUrlInput.focus();
-
+        configPasswordInput.focus();
         const onSubmit = async (e) => {
             e.preventDefault();
-            const url = (configUrlInput.value || '').trim();
-            const token = (configTokenInput.value || '').trim();
+            const password = (configPasswordInput.value || '').trim();
             const submit = configLoginForm.querySelector('button[type="submit"]');
             const originalText = submit ? submit.textContent : '';
-
-            if (!url || !/^https?:\/\//i.test(url)) {
-                showToast('URL inválida', 'error');
+            if (!password) {
+                showToast('Ingresa la contrasena', 'error');
                 return;
             }
-            if (!token) {
-                showToast('Ingresa el token', 'error');
-                return;
-            }
-
             try {
                 if (submit) {
                     submit.disabled = true;
-                    submit.textContent = 'Validando...';
+                    submit.textContent = 'Entrando...';
                 }
-
-                await validateGasConfig(url, token);
-                localStorage.setItem(SK_GAS_URL, url);
-                localStorage.setItem(SK_GAS_TOKEN, token);
+                await loginWithPassword(password);
             } catch (err) {
-                showToast(err.message || 'No se pudo validar la conexión', 'error');
+                showToast(err.message || 'No se pudo iniciar sesion', 'error');
                 return;
             } finally {
                 if (submit) {
@@ -101,43 +77,46 @@ function openConfigLogin(initial) {
                     submit.textContent = originalText || 'Entrar';
                 }
             }
-
             configModal.classList.remove('show');
             configModal.setAttribute('aria-hidden', 'true');
             document.body.classList.remove('modal-open');
             configLoginForm.removeEventListener('submit', onSubmit);
-            resolve({ url, token });
+            resolve(true);
         };
-
         configLoginForm.addEventListener('submit', onSubmit);
     });
 }
-
-async function validateGasConfig(url, token) {
+async function loginWithPassword(password) {
     let res;
     try {
-        const qs = new URLSearchParams({ action: 'ping', token });
-        res = await fetch(`${url}?${qs.toString()}`);
+        res = await fetch(LOGIN_ENDPOINT, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
     } catch (_) {
-        throw new Error('No se pudo conectar con esa URL');
+        throw new Error('No se pudo conectar al servidor');
     }
-    if (!res.ok) {
-        throw new Error('La URL no respondió correctamente');
-    }
-    let payload = null;
+    let payload = {};
     try {
         payload = await res.json();
     } catch (_) {
-        throw new Error('La respuesta del servidor no es válida');
+        throw new Error('Respuesta invalida del servidor');
     }
-    if (!payload || payload.ok !== true || payload.pong !== true) {
-        throw new Error((payload && payload.error) ? payload.error : 'Token o URL inválidos');
+    if (!res.ok || !payload || payload.ok !== true) {
+        throw new Error((payload && payload.error) ? payload.error : 'Contrasena invalida');
     }
 }
-
 async function resetGasSession() {
-    localStorage.removeItem(SK_GAS_URL);
-    localStorage.removeItem(SK_GAS_TOKEN);
+    try {
+        await fetch(LOGOUT_ENDPOINT, {
+            method: 'POST',
+            credentials: 'include'
+        });
+    } catch (_) {
+        // no-op
+    }
     activeFilterTerm = '';
     renderedMessageIds.clear();
     latestSeenInternalDate = 0;
@@ -145,17 +124,15 @@ async function resetGasSession() {
     if (pollingInterval) clearInterval(pollingInterval);
     const live = document.getElementById('liveStatus');
     if (live) live.style.display = 'none';
-    showToast('Sesión cerrada', 'success');
-    await ensureGasConfigOnFirstVisit();
+    showToast('Sesion cerrada', 'success');
+    await ensureSessionOnFirstVisit();
 }
-
 function encodeB64Url(text) {
     const bytes = new TextEncoder().encode(text || '');
     let bin = '';
     for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
     return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
-
 function mapGasItemToMessage(item) {
     const bodyText = item.body || item.snippet || '';
     const bodyHtml = item.html || '';
@@ -183,11 +160,9 @@ function mapGasItemToMessage(item) {
 
 async function searchMails(isSilent = false) {
     if (isSearching) return;
-
     const filter = isSilent ? activeFilterTerm : filterInput.value.trim();
     if (!filter) return;
     const localSeq = isSilent ? activeSearchSeq : (++activeSearchSeq);
-
     if (!isSilent) {
         if (pollingInterval) clearInterval(pollingInterval);
         setLoading(true);
@@ -200,34 +175,32 @@ async function searchMails(isSilent = false) {
     } else {
         isSearching = true;
     }
-
     try {
-        let gas = getGasConfig();
-        if ((!gas.url || !gas.token) && !isSilent) {
-            await ensureGasConfigOnFirstVisit();
-            gas = getGasConfig();
+        if (!isSilent) {
+            const ready = await ensureSessionOnFirstVisit();
+            if (!ready) return;
         }
-        if (!gas.url || !gas.token) {
-            if (!isSilent) showToast('Falta configurar Apps Script URL/Token.', 'error');
-            return;
-        }
-
         const maxLimit = document.getElementById('maxResultsInput').value || 10;
         updateResultsMaxInfo(maxLimit);
-
         const qs = new URLSearchParams({
             action: 'search',
             filter: filter,
-            max: String(maxLimit),
-            token: gas.token
+            max: String(maxLimit)
         });
-        const res = await fetch(`${gas.url}?${qs.toString()}`);
+        const res = await fetch(`${INBOX_ENDPOINT}?${qs.toString()}`, {
+            credentials: 'include'
+        });
         if (localSeq !== activeSearchSeq || filter !== activeFilterTerm) return;
-        if (!res.ok) throw new Error('Error consultando Apps Script');
-
+        if (res.status === 401) {
+            if (!isSilent) {
+                showToast('Sesion vencida. Inicia sesion de nuevo.', 'error');
+                await ensureSessionOnFirstVisit();
+            }
+            return;
+        }
+        if (!res.ok) throw new Error('Error consultando bandeja');
         const payload = await res.json();
-        if (!payload.ok) throw new Error(payload.error || 'Error en Apps Script');
-
+        if (!payload.ok) throw new Error(payload.error || 'Error en servidor');
         const items = Array.isArray(payload.items) ? payload.items : [];
         if (items.length === 0) {
             if (!isSilent) {
@@ -239,12 +212,9 @@ async function searchMails(isSilent = false) {
             }
             return;
         }
-
         const newBatch = items.filter(m => !renderedMessageIds.has(m.id)).reverse();
-
         for (let i = 0; i < newBatch.length; i++) {
             if (localSeq !== activeSearchSeq || filter !== activeFilterTerm) return;
-
             const msg = mapGasItemToMessage(newBatch[i]);
             const msgInternalDate = Number(msg.internalDate || 0);
             const shouldHighlightNew = isSilent && msgInternalDate > latestSeenInternalDate;
@@ -253,21 +223,13 @@ async function searchMails(isSilent = false) {
             renderEmail(msg, true, i, shouldHighlightNew);
         }
     } catch (err) {
-        const msg = err.message || 'Error';
-        if (!isSilent && /no autorizado|autorizado|token/i.test(msg.toLowerCase())) {
-            localStorage.removeItem(SK_GAS_TOKEN);
-            showToast('Token inválido. Inicia sesión de nuevo.', 'error');
-            await ensureGasConfigOnFirstVisit();
-            return;
-        }
-        if (!isSilent) showToast(msg, 'error');
+        if (!isSilent) showToast(err.message || 'Error', 'error');
     } finally {
         if (!isSilent) setLoading(false);
         else isSearching = false;
         if (!isSilent) startPolling();
     }
 }
-
 function startPolling() {
     if (pollingInterval) clearInterval(pollingInterval);
     const live = document.getElementById('liveStatus');
@@ -749,15 +711,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     configLogoutBtn = document.getElementById('configLogoutBtn');
     configModal = document.getElementById('configLoginModal');
     configLoginForm = document.getElementById('configLoginForm');
-    configUrlInput = document.getElementById('configUrlInput');
-    configTokenInput = document.getElementById('configTokenInput');
+    configPasswordInput = document.getElementById('configPasswordInput');
     const maxResultsInput = document.getElementById('maxResultsInput');
-
-    const gas = await ensureGasConfigOnFirstVisit();
-    if (!gas.url || !gas.token) {
-        showToast('Falta URL/token de Apps Script para buscar correos', 'error');
+    const sessionOk = await ensureSessionOnFirstVisit();
+    if (!sessionOk) {
+        showToast('Inicia sesion para buscar correos', 'error');
     }
-
     if (backToTopBtn) {
         backToTopBtn.addEventListener('click', () => {
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -765,7 +724,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     window.addEventListener('scroll', updateBackToTopVisibility, { passive: true });
     updateBackToTopVisibility();
-
     if (filterInput && clearFilterBtn) {
         filterInput.addEventListener('input', updateClearFilterVisibility);
         updateClearFilterVisibility();
@@ -782,7 +740,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             resetGasSession();
         });
     }
-
     if (filterInput) {
         filterInput.addEventListener('paste', () => {
             setTimeout(() => {
