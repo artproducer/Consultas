@@ -1,28 +1,20 @@
 ﻿/**
- * Consulta Inbox - Netlify Functions + sesi?n por contrase?a
+ * Consulta Inbox - Apps Script mode (sin OAuth frontend)
+ * Mantiene la visual/lógica "pro" del render anterior.
  */
-const NETLIFY_API_BASE = 'https://marvelous-salmiakki-382f32.netlify.app';
-const HOST = window.location.hostname;
-const IS_NETLIFY_HOST = /netlify\.app$/i.test(HOST);
-const IS_LOCAL_HOST = /^(localhost|127\.0\.0\.1)$/i.test(HOST);
-// Si no estamos en Netlify ni en local, usamos backend remoto en Netlify.
-const API_BASE = (IS_NETLIFY_HOST || IS_LOCAL_HOST) ? '' : NETLIFY_API_BASE;
-const LOGIN_ENDPOINT = `${API_BASE}/.netlify/functions/login`;
-const INBOX_ENDPOINT = `${API_BASE}/.netlify/functions/inbox`;
-const LOGOUT_ENDPOINT = `${API_BASE}/.netlify/functions/logout`;
+
+const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxpmIstAMA8DUP5gXgAiFWPYlNT8u6s0iIpyINcXunkuJKEEVjGFjjkyizrysHjwfKl/exec';
+const GAS_SECRET_TOKEN = '';
 const POLL_INTERVAL_MS = 700;
-const POLL_INTERVAL_IDLE_MAX_MS = 3200;
-const POLL_INTERVAL_HIDDEN_MS = 700;
-const POLL_ERROR_BACKOFF_MAX_MS = 15000;
+const SK_GAS_TOKEN = 'query_gas_token';
+
 let isSearching = false;
 let pollingInterval = null;
-let pollDelayMs = POLL_INTERVAL_MS;
-let pollIdleStreak = 0;
-let pollErrorStreak = 0;
 let renderedMessageIds = new Set();
 let latestSeenInternalDate = 0;
 let activeSearchSeq = 0;
 let activeFilterTerm = '';
+
 let resultsContainer;
 let loader;
 let submitBtn;
@@ -32,56 +24,69 @@ let clearFilterBtn;
 let configLogoutBtn;
 let configModal;
 let configLoginForm;
-let configPasswordInput;
+let configTokenInput;
 let configLoginPromise = null;
-async function hasActiveSession() {
-    try {
-        const res = await fetch(${INBOX_ENDPOINT}?action=ping, {
-            credentials: 'include'
-        });
-        if (!res.ok) return false;
-        const payload = await res.json();
-        return !!(payload && payload.ok === true && payload.pong === true);
-    } catch (_) {
-        return false;
-    }
+
+function getGasConfig() {
+    const cfg = window.__APP_CONFIG__ || {};
+    const url = (cfg.gasUrl || GAS_WEB_APP_URL || '').trim();
+    const token = (localStorage.getItem(SK_GAS_TOKEN) || cfg.gasToken || GAS_SECRET_TOKEN || '').trim();
+    return { url, token };
 }
-async function ensureSessionOnFirstVisit() {
-    if (await hasActiveSession()) return true;
+
+async function ensureGasConfigOnFirstVisit() {
+    const current = getGasConfig();
+    if (current.url && current.token) return current;
+
     if (configLoginPromise) return configLoginPromise;
-    configLoginPromise = openLoginModal().finally(() => {
+    configLoginPromise = openConfigLogin(current).finally(() => {
         configLoginPromise = null;
     });
     return configLoginPromise;
 }
-function openLoginModal() {
+
+function openConfigLogin(initial) {
     return new Promise((resolve) => {
-        if (!configModal || !configLoginForm || !configPasswordInput) {
-            resolve(false);
+        if (!configModal || !configLoginForm || !configTokenInput) {
+            resolve(initial || { url: '', token: '' });
             return;
         }
-        configPasswordInput.value = '';
+
+        const fixedUrl = initial.url || getGasConfig().url || '';
+        const startToken = initial.token || '';
+        configTokenInput.value = startToken;
+
         configModal.classList.add('show');
         configModal.setAttribute('aria-hidden', 'false');
         document.body.classList.add('modal-open');
-        configPasswordInput.focus();
+
+        configTokenInput.focus();
+
         const onSubmit = async (e) => {
             e.preventDefault();
-            const password = (configPasswordInput.value || '').trim();
+            const token = (configTokenInput.value || '').trim();
             const submit = configLoginForm.querySelector('button[type="submit"]');
             const originalText = submit ? submit.textContent : '';
-            if (!password) {
-                showToast('Ingresa la contrase?a', 'error');
+
+            if (!fixedUrl || !/^https?:\/\//i.test(fixedUrl)) {
+                showToast('URL del servicio no configurada', 'error');
                 return;
             }
+            if (!token) {
+                showToast('Ingresa la contraseña', 'error');
+                return;
+            }
+
             try {
                 if (submit) {
                     submit.disabled = true;
-                    submit.textContent = 'Entrando...';
+                    submit.textContent = 'Validando...';
                 }
-                await loginWithPassword(password);
+
+                await validateGasConfig(fixedUrl, token);
+                localStorage.setItem(SK_GAS_TOKEN, token);
             } catch (err) {
-                showToast(err.message || 'No se pudo iniciar sesi?n', 'error');
+                showToast(err.message || 'No se pudo validar la conexión', 'error');
                 return;
             } finally {
                 if (submit) {
@@ -89,109 +94,60 @@ function openLoginModal() {
                     submit.textContent = originalText || 'Entrar';
                 }
             }
+
             configModal.classList.remove('show');
             configModal.setAttribute('aria-hidden', 'true');
             document.body.classList.remove('modal-open');
             configLoginForm.removeEventListener('submit', onSubmit);
-            resolve(true);
+            resolve({ url: fixedUrl, token });
         };
+
         configLoginForm.addEventListener('submit', onSubmit);
     });
 }
-async function loginWithPassword(password) {
+
+async function validateGasConfig(url, token) {
     let res;
     try {
-        res = await fetch(LOGIN_ENDPOINT, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password })
-        });
+        const qs = new URLSearchParams({ action: 'ping', token });
+        res = await fetch(`${url}?${qs.toString()}`);
     } catch (_) {
-        throw new Error('No se pudo conectar al servidor');
+        throw new Error('No se pudo conectar con esa URL');
     }
-    const raw = await res.text();
-    let payload = {};
+    if (!res.ok) {
+        throw new Error('La URL no respondió correctamente');
+    }
+    let payload = null;
     try {
-        payload = raw ? JSON.parse(raw) : {};
+        payload = await res.json();
     } catch (_) {
-<<<<<<< ours
-        throw new Error(`Backend no actualizado o URL incorrecta (HTTP ${res.status})`);
-=======
-        throw new Error('Respuesta inv?lida del servidor');
->>>>>>> theirs
+        throw new Error('La respuesta del servidor no es válida');
     }
-    if (!res.ok || !payload || payload.ok !== true) {
-        throw new Error((payload && payload.error) ? payload.error : 'Contrase?a inv?lida');
+    if (!payload || payload.ok !== true || payload.pong !== true) {
+        throw new Error((payload && payload.error) ? payload.error : 'Token o URL inválidos');
     }
-}
-
-function clearPollingLoop() {
-    if (pollingInterval) {
-        clearTimeout(pollingInterval);
-        pollingInterval = null;
-    }
-}
-
-function resetPollingCadence() {
-    pollDelayMs = POLL_INTERVAL_MS;
-    pollIdleStreak = 0;
-    pollErrorStreak = 0;
-}
-
-function markPollingSuccess(newItemsCount) {
-    pollErrorStreak = 0;
-    if (newItemsCount > 0) {
-        pollIdleStreak = 0;
-        pollDelayMs = POLL_INTERVAL_MS;
-        return;
-    }
-    pollIdleStreak = Math.min(pollIdleStreak + 1, 8);
-    pollDelayMs = Math.min(POLL_INTERVAL_IDLE_MAX_MS, POLL_INTERVAL_MS + (pollIdleStreak * 320));
-}
-
-function markPollingError(authIssue = false) {
-    pollIdleStreak = 0;
-    if (authIssue) {
-        pollDelayMs = Math.max(pollDelayMs, 10000);
-        return;
-    }
-    pollErrorStreak = Math.min(pollErrorStreak + 1, 6);
-    const nextDelay = POLL_INTERVAL_MS * Math.pow(2, pollErrorStreak);
-    pollDelayMs = Math.min(POLL_ERROR_BACKOFF_MAX_MS, nextDelay);
-}
-
-function getEffectivePollDelay() {
-    if (document.hidden) return Math.max(POLL_INTERVAL_HIDDEN_MS, pollDelayMs);
-    return pollDelayMs;
 }
 
 async function resetGasSession() {
-    try {
-        await fetch(LOGOUT_ENDPOINT, {
-            method: 'POST',
-            credentials: 'include'
-        });
-    } catch (_) {
-        // no-op
-    }
+    localStorage.removeItem(SK_GAS_TOKEN);
     activeFilterTerm = '';
     renderedMessageIds.clear();
     latestSeenInternalDate = 0;
     resultsContainer.innerHTML = '';
-    clearPollingLoop();
-    resetPollingCadence();
+    if (pollingInterval) clearInterval(pollingInterval);
     const live = document.getElementById('liveStatus');
     if (live) live.style.display = 'none';
-    showToast('Sesi?n cerrada', 'success');
-    await ensureSessionOnFirstVisit();
+    showToast('Sesión cerrada', 'success');
+    await ensureGasConfigOnFirstVisit();
 }
+
 function encodeB64Url(text) {
     const bytes = new TextEncoder().encode(text || '');
     let bin = '';
     for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
     return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
+
 function mapGasItemToMessage(item) {
     const bodyText = item.body || item.snippet || '';
     const bodyHtml = item.html || '';
@@ -219,13 +175,13 @@ function mapGasItemToMessage(item) {
 
 async function searchMails(isSilent = false) {
     if (isSearching) return;
+
     const filter = isSilent ? activeFilterTerm : filterInput.value.trim();
     if (!filter) return;
     const localSeq = isSilent ? activeSearchSeq : (++activeSearchSeq);
-    let newItemsCount = 0;
+
     if (!isSilent) {
-        clearPollingLoop();
-        resetPollingCadence();
+        if (pollingInterval) clearInterval(pollingInterval);
         setLoading(true);
         activeFilterTerm = filter;
         resultsContainer.innerHTML = '';
@@ -236,49 +192,51 @@ async function searchMails(isSilent = false) {
     } else {
         isSearching = true;
     }
+
     try {
-        if (!isSilent) {
-            const ready = await ensureSessionOnFirstVisit();
-            if (!ready) return;
+        let gas = getGasConfig();
+        if ((!gas.url || !gas.token) && !isSilent) {
+            await ensureGasConfigOnFirstVisit();
+            gas = getGasConfig();
         }
+        if (!gas.url || !gas.token) {
+            if (!isSilent) showToast('Falta contraseña para iniciar sesión.', 'error');
+            return;
+        }
+
         const maxLimit = document.getElementById('maxResultsInput').value || 10;
         updateResultsMaxInfo(maxLimit);
+
         const qs = new URLSearchParams({
             action: 'search',
             filter: filter,
-            max: String(maxLimit)
+            max: String(maxLimit),
+            token: gas.token
         });
-        const res = await fetch(${INBOX_ENDPOINT}?, {
-            credentials: 'include'
-        });
+        const res = await fetch(`${gas.url}?${qs.toString()}`);
         if (localSeq !== activeSearchSeq || filter !== activeFilterTerm) return;
-        if (res.status === 401) {
-            if (isSilent) markPollingError(true);
-            if (!isSilent) {
-                showToast('Sesi?n vencida. Inicia sesi?n de nuevo.', 'error');
-                await ensureSessionOnFirstVisit();
-            }
-            return;
-        }
-        if (!res.ok) throw new Error('Error consultando bandeja');
+        if (!res.ok) throw new Error('Error consultando Apps Script');
+
         const payload = await res.json();
-        if (!payload.ok) throw new Error(payload.error || 'Error en servidor');
+        if (!payload.ok) throw new Error(payload.error || 'Error en Apps Script');
+
         const items = Array.isArray(payload.items) ? payload.items : [];
         if (items.length === 0) {
-            if (isSilent) markPollingSuccess(0);
             if (!isSilent) {
-                resultsContainer.innerHTML = 
+                resultsContainer.innerHTML = `
                     <div style="text-align:center; padding:40px; border-radius:18px; border:1px dashed var(--border);">
                         <div style="font-size:0.9rem; font-weight:600; color:var(--text); margin-bottom:8px;">No se encontraron resultados</div>
                     </div>
-                ;
+                `;
             }
             return;
         }
+
         const newBatch = items.filter(m => !renderedMessageIds.has(m.id)).reverse();
-        newItemsCount = newBatch.length;
+
         for (let i = 0; i < newBatch.length; i++) {
             if (localSeq !== activeSearchSeq || filter !== activeFilterTerm) return;
+
             const msg = mapGasItemToMessage(newBatch[i]);
             const msgInternalDate = Number(msg.internalDate || 0);
             const shouldHighlightNew = isSilent && msgInternalDate > latestSeenInternalDate;
@@ -286,27 +244,31 @@ async function searchMails(isSilent = false) {
             renderedMessageIds.add(newBatch[i].id);
             renderEmail(msg, true, i, shouldHighlightNew);
         }
-        if (isSilent) markPollingSuccess(newItemsCount);
     } catch (err) {
-        if (isSilent) markPollingError(false);
-        if (!isSilent) showToast(err.message || 'Error', 'error');
+        const msg = err.message || 'Error';
+        if (!isSilent && /no autorizado|autorizado|token/i.test(msg.toLowerCase())) {
+            localStorage.removeItem(SK_GAS_TOKEN);
+            showToast('Token inválido. Inicia sesión de nuevo.', 'error');
+            await ensureGasConfigOnFirstVisit();
+            return;
+        }
+        if (!isSilent) showToast(msg, 'error');
     } finally {
         if (!isSilent) setLoading(false);
         else isSearching = false;
         if (!isSilent) startPolling();
     }
 }
+
 function startPolling() {
-    clearPollingLoop();
+    if (pollingInterval) clearInterval(pollingInterval);
     const live = document.getElementById('liveStatus');
     if (live) live.style.display = 'inline-flex';
-    const tick = async () => {
+    pollingInterval = setInterval(() => {
         const filter = activeFilterTerm.trim();
         if (!filter) return;
-        if (!isSearching) await searchMails(true);
-        pollingInterval = setTimeout(tick, getEffectivePollDelay());
-    };
-    pollingInterval = setTimeout(tick, getEffectivePollDelay());
+        if (!isSearching) searchMails(true);
+    }, POLL_INTERVAL_MS);
 }
 
 function renderEmail(msg, prepend = false, _animIndex = 0, highlightAsNew = false) {
@@ -569,7 +531,7 @@ function renderEmail(msg, prepend = false, _animIndex = 0, highlightAsNew = fals
 
 function renderHtmlInIframe(iframe, html) {
     if (!iframe || !iframe.contentWindow) return;
-    const raw = String(html || '').replace(/<base\b[^>]*>/gi, '');
+    const raw = String(html || '');
     const hasHtmlShell = /<html[\s>]/i.test(raw) || /<body[\s>]/i.test(raw);
     const docHtml = hasHtmlShell
         ? raw
@@ -579,33 +541,6 @@ function renderHtmlInIframe(iframe, html) {
     iframeDoc.open();
     iframeDoc.write(docHtml);
     iframeDoc.close();
-
-    try {
-        const d = iframe.contentWindow.document;
-        d.querySelectorAll('base').forEach(el => el.remove());
-        d.querySelectorAll('a[href]').forEach(a => {
-            a.setAttribute('target', '_blank');
-            const prevRel = (a.getAttribute('rel') || '').trim();
-            const relSet = new Set(prevRel ? prevRel.split(/\s+/) : []);
-            relSet.add('noopener');
-            relSet.add('noreferrer');
-            a.setAttribute('rel', Array.from(relSet).join(' '));
-        });
-
-        d.addEventListener('click', (ev) => {
-            const tgt = ev.target;
-            const anchor = tgt && typeof tgt.closest === 'function' ? tgt.closest('a[href]') : null;
-            if (!anchor) return;
-            const href = (anchor.getAttribute('href') || '').trim();
-            if (!href || href.startsWith('#') || /^javascript:/i.test(href)) return;
-            ev.preventDefault();
-            ev.stopPropagation();
-            const outUrl = anchor.href || href;
-            window.open(outUrl, '_blank', 'noopener,noreferrer');
-        }, true);
-    } catch (_) {
-        // no-op
-    }
 
     const resize = () => {
         try {
@@ -787,11 +722,6 @@ window.pasteFromClipboard = function () {
 window.clearFilterInput = function () {
     filterInput.value = '';
     filterInput.focus();
-    activeFilterTerm = '';
-    clearPollingLoop();
-    resetPollingCadence();
-    const live = document.getElementById('liveStatus');
-    if (live) live.style.display = 'none';
     updateClearFilterVisibility();
 };
 
@@ -811,12 +741,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     configLogoutBtn = document.getElementById('configLogoutBtn');
     configModal = document.getElementById('configLoginModal');
     configLoginForm = document.getElementById('configLoginForm');
-    configPasswordInput = document.getElementById('configPasswordInput');
+    configTokenInput = document.getElementById('configTokenInput');
     const maxResultsInput = document.getElementById('maxResultsInput');
-    const sessionOk = await ensureSessionOnFirstVisit();
-    if (!sessionOk) {
-        showToast('Inicia sesi?n para buscar correos', 'error');
+
+    const gas = await ensureGasConfigOnFirstVisit();
+    if (!gas.url || !gas.token) {
+        showToast('Ingresa tu contraseña para continuar', 'error');
     }
+
     if (backToTopBtn) {
         backToTopBtn.addEventListener('click', () => {
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -824,18 +756,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     window.addEventListener('scroll', updateBackToTopVisibility, { passive: true });
     updateBackToTopVisibility();
+
     if (filterInput && clearFilterBtn) {
-        filterInput.addEventListener('input', () => {
-            updateClearFilterVisibility();
-            const typedFilter = filterInput.value.trim();
-            if (activeFilterTerm && typedFilter !== activeFilterTerm) {
-                activeFilterTerm = '';
-                clearPollingLoop();
-                resetPollingCadence();
-                const live = document.getElementById('liveStatus');
-                if (live) live.style.display = 'none';
-            }
-        });
+        filterInput.addEventListener('input', updateClearFilterVisibility);
         updateClearFilterVisibility();
     }
     if (maxResultsInput) {
@@ -850,6 +773,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             resetGasSession();
         });
     }
+
     if (filterInput) {
         filterInput.addEventListener('paste', () => {
             setTimeout(() => {
@@ -859,11 +783,5 @@ document.addEventListener('DOMContentLoaded', async () => {
             }, 100);
         });
     }
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) return;
-        if (!activeFilterTerm.trim()) return;
-        resetPollingCadence();
-        clearPollingLoop();
-        startPolling();
-    });
 });
+
