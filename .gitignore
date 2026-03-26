@@ -1,0 +1,9 @@
+﻿# Config privada frontend
+app-config.js
+
+# Config local de clasp (Apps Script)
+.clasp.json
+gas/.clasp.json
+
+# Script ya desplegado en Apps Script
+gas/

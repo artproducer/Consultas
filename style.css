@@ -162,169 +162,6 @@ body {
     background: rgba(0, 0, 0, 0.5);
 }
 
-#config-banner p {
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    margin-bottom: 20px;
-}
-
-.config-label {
-    display: block;
-    font-size: 0.65rem;
-    font-weight: 600;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-top: 14px;
-    margin-bottom: 6px;
-}
-
-#config-banner input {
-    width: 100%;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-size: 0.85rem;
-    padding: 12px;
-    border-radius: 10px;
-    margin-bottom: 4px;
-    outline: none;
-    transition: border-color 0.2s;
-}
-
-#config-banner input:focus {
-    border-color: var(--accent);
-}
-
-.config-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 16px;
-}
-
-.config-actions button {
-    flex: 1;
-    padding: 10px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    border-radius: 10px;
-    border: none;
-    transition: all 0.2s;
-}
-
-.btn-save { background: var(--accent); color: #000; }
-.btn-save:hover { opacity: 0.9; }
-.btn-clear { background: transparent; color: var(--danger); border: 1px solid rgba(255, 68, 68, 0.2) !important; }
-.btn-clear:hover { background: rgba(255, 68, 68, 0.05); }
-
-/* Ultra-Minimalist Corner Auth */
-#authCard {
-    position: absolute;
-    top: -78px;
-    right: 0;
-    z-index: 50;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-}
-
-#authBtn {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.05);
-    padding: 8px;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: all 0.2s;
-    width: 38px;
-    height: 38px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-#authBtn:hover { 
-    background: rgba(255,255,255,0.1);
-    transform: scale(1.1);
-}
-
-#authBtn svg { width: 18px; height: 18px; }
-
-#authBtn.has-avatar {
-    padding: 0;
-    overflow: hidden;
-}
-
-#authBtn .auth-avatar {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 50%;
-    display: block;
-}
-
-.auth-status {
-    position: absolute;
-    right: 48px;
-    top: 0px;
-    font-size: 0.65rem;
-    color: var(--text-muted);
-    opacity: 0;
-    transition: all 0.2s;
-    background: var(--surface);
-    padding: 6px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    white-space: nowrap;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-#authCard:hover .auth-status { opacity: 1; right: 44px; }
-
-.disconnect-btn {
-    background: rgba(255, 68, 68, 0.1);
-    color: var(--danger);
-    border: 1px solid rgba(255, 68, 68, 0.2);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.6rem;
-    cursor: pointer;
-}
-
-.disconnect-btn:hover { background: var(--danger); color: #fff; }
-
-#authCard.connected #authBtn::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 10px;
-    height: 10px;
-    background: var(--green);
-    border-radius: 50%;
-    border: 1.5px solid var(--bg);
-}
-
-.auth-config-link {
-    font-size: 0.65rem;
-    color: var(--text-muted);
-    background: none;
-    border: none;
-    cursor: pointer;
-    margin-top: 6px;
-    opacity: 0.8;
-    transition: opacity 0.2s;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.auth-config-link:hover {
-    opacity: 1;
-    color: var(--accent);
-}
-
 /* Form */
 .field label {
     display: block;
@@ -342,7 +179,7 @@ body {
     align-items: center;
 }
 
-input[type="email"] {
+#filterEmail {
     width: 100%;
     height: 52px;
     padding: 0 78px 0 16px;
@@ -356,7 +193,7 @@ input[type="email"] {
     transition: all 0.2s;
 }
 
-input[type="email"]:focus {
+#filterEmail:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-glow);
 }
@@ -378,8 +215,8 @@ input[type="email"]:focus {
 .paste-btn:hover { color: var(--accent); }
 
 .paste-btn svg {
-    width: 70px;
-    height: 70px;
+    width: 20px;
+    height: 20px;
 }
 
 .clear-btn {
@@ -491,13 +328,6 @@ input[type="email"]:focus {
     opacity: 0.6;
 }
 
-.msg-body iframe {
-    width: 100%;
-    min-height: 500px;
-    border: none;
-    border-radius: 8px;
-}
-
 /* Metadata summary shown before expanding */
 .card-summary {
     display: block;
@@ -582,20 +412,44 @@ input[type="email"]:focus {
     justify-content: flex-start;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
+}
+
+.email-item a[onclick],
+.email-item .click-to-copy {
+    user-select: none;
 }
 
 .btn-view, .btn-link-action {
-    color: var(--accent);
+    color: #0d1514;
     text-decoration: none;
-    font-weight: 600;
-    font-size: 0.8rem;
-    background: none;
-    border: none;
+    font-weight: 700;
+    font-size: 0.76rem;
+    background: rgba(18, 140, 126, 0.95);
+    border: 1px solid rgba(18, 140, 126, 1);
+    border-radius: 999px;
     cursor: pointer;
-    padding: 4px 0;
+    padding: 6px 12px;
+    letter-spacing: 0.01em;
+    line-height: 1;
+    transition: transform 0.15s, filter 0.2s;
 }
 
-.btn-view:hover { opacity: 0.8; }
+.btn-link-action {
+    color: #00110f;
+}
+
+.btn-view {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid rgba(18, 140, 126, 0.45);
+}
+
+.btn-view:hover,
+.btn-link-action:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+}
 
 /* Message Body */
 .msg-body {
@@ -645,15 +499,20 @@ input[type="email"]:focus {
 }
 
 .copy-mini {
-    margin-left: auto;
+    margin-left: 2px;
     background: none;
     border: none;
-    color: var(--text-muted);
+    color: var(--green);
     cursor: pointer;
-    font-size: 1.1rem;
-    transition: color 0.2s;
+    font-size: 0.82rem;
+    font-weight: 700;
+    line-height: 1;
+    transition: color 0.2s, transform 0.15s;
 }
-.copy-mini:hover { color: var(--green); }
+.copy-mini:hover {
+    color: #0a4a42;
+    transform: scale(1.05);
+}
 
 /* Loader */
 #loader {
@@ -729,22 +588,6 @@ input[type="email"]:focus {
     border-color: rgba(18, 140, 126, 0.65);
 }
 
-/* Logout */
-.disconnect {
-    position: absolute;
-    top: 15px;
-    right: 15px;
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 6px 12px;
-    border-radius: 14px;
-    border: 1px solid var(--border);
-    background: rgba(255,255,255,0.03);
-    font-weight: 600;
-}
-.disconnect:hover { color: var(--danger); background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.2); }
-
 /* RESPONSIVE */
 @media (max-width: 480px) {
     body { padding: 12px 10px; }
@@ -754,11 +597,10 @@ input[type="email"]:focus {
     .email-subject { font-size: 0.9rem; }
     .email-snippet { font-size: 0.75rem; }
     .btn-submit { padding: 12px; font-size: 0.9rem; }
-    input[type="email"] { padding: 11px 72px 11px 12px; font-size: 0.85rem; }
+    #filterEmail { padding: 11px 72px 11px 12px; font-size: 0.85rem; }
     .max-control { height: 28px; padding: 3px 7px; }
     #maxResultsInput { width: 42px; font-size: 0.75rem; }
     .results-head { margin-bottom: 12px; }
-    #authCard { top: -64px; right: 0; }
 }
 
 /* Small screens like 350x480 */

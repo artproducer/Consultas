@@ -1,206 +1,124 @@
-/**
- * GMAIL QUERY TOOL - SCRIPT
- * Manages OAuth flow and Gmail API searching / rendering.
+﻿/**
+ * Consulta Inbox - Apps Script mode (sin OAuth frontend)
+ * Mantiene la visual/lógica "pro" del render anterior.
  */
 
-// ─── CONFIGURATION ───────────────────────────────────────────────────────────
-const HARDCODED_CLIENT_ID = ''; // Use placeholder in UI instead of pre-filling value
-const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email';
-const SK_CID = 'query_client_id';
-const SK_ACCESS = 'query_access_token';
-const SK_EXPIRY = 'query_token_expiry';
+const GAS_WEB_APP_URL = '';
+const GAS_SECRET_TOKEN = '';
+const POLL_INTERVAL_MS = 700;
+const SK_GAS_URL = 'query_gas_url';
+const SK_GAS_TOKEN = 'query_gas_token';
 
-let accessToken = null;
-let tokenClient = null;
 let isSearching = false;
 let pollingInterval = null;
 let renderedMessageIds = new Set();
 let latestSeenInternalDate = 0;
-let defaultAuthBtnHtml = '';
-let tokenWatchInterval = null;
-let suppressAuthErrors = false;
+let activeSearchSeq = 0;
+let activeFilterTerm = '';
 
-// DOM Cache
-let resultsContainer, loader, submitBtn, filterInput, authBtn, authText, banner, clientIdInput, backToTopBtn, clearFilterBtn;
+let resultsContainer;
+let loader;
+let submitBtn;
+let filterInput;
+let backToTopBtn;
+let clearFilterBtn;
 
-// ─── AUTHENTICATION (GIS) ────────────────────────────────────────────────────
-function getSavedClientId() { return localStorage.getItem(SK_CID) || ''; }
-function getClientId() { return getSavedClientId(); }
+function getGasConfig() {
+    const cfg = window.__APP_CONFIG__ || {};
+    const url = (cfg.gasUrl || localStorage.getItem(SK_GAS_URL) || GAS_WEB_APP_URL || '').trim();
+    const token = (cfg.gasToken || localStorage.getItem(SK_GAS_TOKEN) || GAS_SECRET_TOKEN || '').trim();
+    return { url, token };
+}
 
-function initTokenClient() {
-    const cid = getClientId();
-    if (!cid || !window.google) return false;
-    tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: cid,
-        scope: SCOPE,
-        callback: handleTokenResponse,
-        error_callback: (err) => {
-            if (suppressAuthErrors) {
-                suppressAuthErrors = false;
-                return;
-            }
-            showToast('Error Google: ' + (err.type || 'Error'), 'error');
+function ensureGasConfigOnFirstVisit() {
+    const current = getGasConfig();
+    if (current.url && current.token) return current;
+
+    const enteredUrl = current.url || (prompt('Pega la URL de tu Web App de Apps Script:') || '').trim();
+    if (!enteredUrl) return { url: current.url || '', token: current.token || '' };
+
+    const enteredToken = current.token || (prompt('Pega tu token secreto de Apps Script:') || '').trim();
+    if (!enteredToken) return { url: enteredUrl, token: current.token || '' };
+
+    if (!current.url) localStorage.setItem(SK_GAS_URL, enteredUrl);
+    if (!current.token) localStorage.setItem(SK_GAS_TOKEN, enteredToken);
+    return { url: enteredUrl, token: enteredToken };
+}
+
+function encodeB64Url(text) {
+    const bytes = new TextEncoder().encode(text || '');
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function mapGasItemToMessage(item) {
+    const bodyText = item.body || item.snippet || '';
+    const bodyHtml = item.html || '';
+    return {
+        id: item.id || ('gas-' + Date.now()),
+        snippet: item.snippet || bodyText,
+        internalDate: String(new Date(item.date || Date.now()).getTime()),
+        gasPlainBody: bodyText,
+        gasHtmlBody: bodyHtml,
+        payload: {
+            mimeType: 'multipart/alternative',
+            headers: [
+                { name: 'Subject', value: item.subject || '(Sin asunto)' },
+                { name: 'From', value: item.from || '' },
+                { name: 'Date', value: item.date || new Date().toISOString() }
+            ],
+            parts: [
+                { mimeType: 'text/plain', body: { data: encodeB64Url(bodyText) } },
+                { mimeType: 'text/html', body: { data: encodeB64Url(bodyHtml) } }
+            ],
+            body: { data: encodeB64Url(bodyText) }
         }
-    });
-    return true;
-}
-
-function startAuth() {
-    if (accessToken) return; // Prevent prompt if already connected
-    const cid = getClientId();
-    if (!cid) { toggleConfig(); return; }
-    if (!tokenClient && !initTokenClient()) return;
-    tokenClient.requestAccessToken({ prompt: 'consent' });
-}
-
-function handleTokenResponse(res) {
-    if (res.error) {
-        if (!suppressAuthErrors) showToast('Error: ' + res.error, 'error');
-        suppressAuthErrors = false;
-        return;
-    }
-    suppressAuthErrors = false;
-    accessToken = res.access_token;
-    localStorage.setItem(SK_ACCESS, accessToken);
-    localStorage.setItem(SK_EXPIRY, Date.now() + (res.expires_in * 1000));
-    onAuthed();
-}
-
-function onAuthed() {
-    const card = document.getElementById('authCard');
-    card.classList.add('connected');
-
-    authText.textContent = 'Sesión Activa';
-    loadConnectedUserAvatar();
-    startTokenWatch();
-
-    // Clicking icon while authed toggles the menu (good for mobile)
-    authBtn.onclick = (e) => {
-        e.stopPropagation();
-        authText.style.opacity = authText.style.opacity === '1' ? '0' : '1';
-        authText.style.pointerEvents = authText.style.opacity === '1' ? 'auto' : 'none';
     };
-
-    // Put Disconnect inside the status hover area
-    if (!authText.querySelector('.disconnect-btn')) {
-        const btn = document.createElement('button');
-        btn.className = 'disconnect-btn';
-        btn.textContent = 'Cerrar';
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            logout();
-        };
-        authText.appendChild(btn);
-    }
 }
-
-function setAuthDefaultIcon() {
-    if (!authBtn) return;
-    authBtn.classList.remove('has-avatar');
-    if (defaultAuthBtnHtml) authBtn.innerHTML = defaultAuthBtnHtml;
-}
-
-function setAuthAvatar(photoUrl) {
-    if (!authBtn || !photoUrl) return;
-    authBtn.classList.add('has-avatar');
-    authBtn.innerHTML = `<img class="auth-avatar" src="${photoUrl}" alt="Perfil">`;
-}
-
-async function loadConnectedUserAvatar() {
-    if (!accessToken) return;
-    try {
-        const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-            headers: { 'Authorization': 'Bearer ' + accessToken }
-        });
-        if (!res.ok) throw new Error('No profile');
-        const data = await res.json();
-        if (data && data.picture) setAuthAvatar(data.picture);
-        else setAuthDefaultIcon();
-    } catch (_) {
-        setAuthDefaultIcon();
-    }
-}
-
-function logout() {
-    localStorage.removeItem(SK_ACCESS);
-    localStorage.removeItem(SK_EXPIRY);
-    accessToken = null;
-    if (tokenWatchInterval) clearInterval(tokenWatchInterval);
-    location.reload();
-}
-
-function isTokenValid() {
-    const exp = parseInt(localStorage.getItem(SK_EXPIRY) || '0');
-    return exp > Date.now();
-}
-
-function isTokenExpiringSoon(bufferMs = 120000) {
-    const exp = parseInt(localStorage.getItem(SK_EXPIRY) || '0');
-    if (!exp) return true;
-    return (exp - Date.now()) <= bufferMs;
-}
-
-function refreshAccessTokenSilently() {
-    if (!tokenClient && !initTokenClient()) return;
-    suppressAuthErrors = true;
-    tokenClient.requestAccessToken({ prompt: '' });
-}
-
-function startTokenWatch() {
-    if (tokenWatchInterval) clearInterval(tokenWatchInterval);
-    tokenWatchInterval = setInterval(() => {
-        if (!accessToken) return;
-        if (isTokenExpiringSoon()) refreshAccessTokenSilently();
-    }, 60000);
-}
-
-// ─── SEARCH & RENDER ─────────────────────────────────────────────────────────
 
 async function searchMails(isSilent = false) {
     if (isSearching) return;
 
-    if (!accessToken && isTokenValid()) {
-        accessToken = localStorage.getItem(SK_ACCESS);
-        onAuthed();
-    }
-
-    if (!accessToken) {
-        if (!isSilent) {
-            showToast('Conecta con Google primero', 'error');
-            startAuth();
-        }
-        return;
-    }
-
-    const filter = filterInput.value.trim();
+    const filter = isSilent ? activeFilterTerm : filterInput.value.trim();
     if (!filter) return;
+    const localSeq = isSilent ? activeSearchSeq : (++activeSearchSeq);
 
     if (!isSilent) {
         if (pollingInterval) clearInterval(pollingInterval);
         setLoading(true);
+        activeFilterTerm = filter;
         resultsContainer.innerHTML = '';
         renderedMessageIds.clear();
         latestSeenInternalDate = 0;
-        document.getElementById('liveStatus').style.display = 'none';
+        const live = document.getElementById('liveStatus');
+        if (live) live.style.display = 'none';
     } else {
-        // Silent polling must also lock to avoid overlapping requests
         isSearching = true;
     }
 
     try {
         const maxLimit = document.getElementById('maxResultsInput').value || 10;
-        const query = encodeURIComponent(`${filter}`);
-        const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=${maxLimit}`, {
-            headers: { 'Authorization': 'Bearer ' + accessToken }
-        });
         updateResultsMaxInfo(maxLimit);
 
-        if (listRes.status === 401) { logout(); throw new Error('Sesión expirada. Por favor reconecta.'); }
-        if (!listRes.ok) throw new Error('Error buscando correos');
+        const gas = getGasConfig();
+        if (!gas.url || !gas.token) throw new Error('Falta configurar Apps Script URL/Token.');
 
-        const listData = await listRes.json();
+        const qs = new URLSearchParams({
+            action: 'search',
+            filter: filter,
+            max: String(maxLimit),
+            token: gas.token
+        });
+        const res = await fetch(`${gas.url}?${qs.toString()}`);
+        if (localSeq !== activeSearchSeq || filter !== activeFilterTerm) return;
+        if (!res.ok) throw new Error('Error consultando Apps Script');
 
-        if (!listData.messages || listData.messages.length === 0) {
+        const payload = await res.json();
+        if (!payload.ok) throw new Error(payload.error || 'Error en Apps Script');
+
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        if (items.length === 0) {
             if (!isSilent) {
                 resultsContainer.innerHTML = `
                     <div style="text-align:center; padding:40px; border-radius:18px; border:1px dashed var(--border);">
@@ -211,24 +129,20 @@ async function searchMails(isSilent = false) {
             return;
         }
 
-        // Mantener orden de carga anterior
-        const newBatch = listData.messages.filter(m => !renderedMessageIds.has(m.id)).reverse();
+        const newBatch = items.filter(m => !renderedMessageIds.has(m.id)).reverse();
 
         for (let i = 0; i < newBatch.length; i++) {
-            const msg = newBatch[i];
-            const detailRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`, {
-                headers: { 'Authorization': 'Bearer ' + accessToken }
-            });
-            const data = await detailRes.json();
-            const msgInternalDate = Number(data.internalDate || 0);
+            if (localSeq !== activeSearchSeq || filter !== activeFilterTerm) return;
+
+            const msg = mapGasItemToMessage(newBatch[i]);
+            const msgInternalDate = Number(msg.internalDate || 0);
             const shouldHighlightNew = isSilent && msgInternalDate > latestSeenInternalDate;
             latestSeenInternalDate = Math.max(latestSeenInternalDate, msgInternalDate);
-            renderedMessageIds.add(msg.id);
-            renderEmail(data, true, i, shouldHighlightNew);
+            renderedMessageIds.add(newBatch[i].id);
+            renderEmail(msg, true, i, shouldHighlightNew);
         }
-
     } catch (err) {
-        if (!isSilent) showToast(err.message, 'error');
+        if (!isSilent) showToast(err.message || 'Error', 'error');
     } finally {
         if (!isSilent) setLoading(false);
         else isSearching = false;
@@ -241,54 +155,53 @@ function startPolling() {
     const live = document.getElementById('liveStatus');
     if (live) live.style.display = 'inline-flex';
     pollingInterval = setInterval(() => {
-        const filter = filterInput.value.trim();
-        if (filter && !isSearching) searchMails(true);
-    }, 2000);
+        const filter = activeFilterTerm.trim();
+        if (!filter) return;
+        if (!isSearching) searchMails(true);
+    }, POLL_INTERVAL_MS);
 }
 
-function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false) {
-    const headers = msg.payload.headers;
+function renderEmail(msg, prepend = false, _animIndex = 0, highlightAsNew = false) {
+    const headers = msg.payload.headers || [];
     const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '(Sin asunto)';
     const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
     const dateStr = headers.find(h => h.name.toLowerCase() === 'date')?.value || '';
-    const date = new Date(dateStr).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+    const date = new Date(dateStr).toLocaleString('es-ES', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+    }).toUpperCase();
 
-    const { content, isHtml } = extractBody(msg.payload);
+    const { content, isHtml } = extractBody(msg);
 
-    // Advanced Code Detection with DOM Parsing (Disney+, Netflix, etc.)
     let foundCode = null;
-    let pureText = content;
-
+    let pureText = content || '';
     let doc = null;
-    // Crucial: DOMParser completely ignores HTML attributes and tags
+
     if (isHtml) {
         const parser = new DOMParser();
         doc = parser.parseFromString(content, 'text/html');
-
-        // Remove style and script tags which contain code, not text
         doc.querySelectorAll('style, script').forEach(s => s.remove());
-
-        pureText = doc.body.textContent || "";
+        pureText = (doc.body && doc.body.textContent) ? doc.body.textContent : '';
     }
 
-    // Normalize text: remove tabs, newlines and extra spaces
-    const searchContext = `${subject} | ${msg.snippet} | ${pureText}`.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ');
+    const searchContext = `${subject} | ${msg.snippet || ''} | ${pureText}`.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ');
 
     const isInvalidCode = (c, context, raw = null) => {
-        if (/^(202[4-9]|2030)$/.test(c)) return true; // Common years
-        if (/^[0-9]{5}$/.test(c)) return true; // ZIP codes
-        if (/^(.)\1+$/.test(c)) return true; // Repeated digits (0000)
-        if (c.includes('1570') || c.startsWith('01800')) return true; // Phone fragments
+        if (/^(202[4-9]|2030)$/.test(c)) return true;
+        if (/^[0-9]{5}$/.test(c)) return true;
+        if (/^(.)\1+$/.test(c)) return true;
+        if (c.includes('1570') || c.startsWith('01800')) return true;
 
-        // Use raw (spaced) version if provided to find correct position in context
         const searchStr = raw || c;
         const pos = context.indexOf(searchStr);
         if (pos === -1) return false;
 
-        // Anti-Tracking/SRC ID check: if number is surrounded by hyphens or hex-like chars
         const surrounding = context.substring(Math.max(0, pos - 15), Math.min(context.length, pos + searchStr.length + 15));
-        if (/[0-9a-fA-F]{4,}[-_]|[-_][0-9a-fA-F]{4,}/.test(surrounding)) return true; // e.g., 1234-ABCD, ABCD-1234
-        if (surrounding.includes('SRC:') || surrounding.includes('ID:') || /src/i.test(surrounding) || surrounding.includes('UUID')) return true; // e.g., SRC:1234, ID:5678, UUID-9012
+        if (/[0-9a-fA-F]{4,}[-_]|[-_][0-9a-fA-F]{4,}/.test(surrounding)) return true;
+        if (surrounding.includes('SRC:') || surrounding.includes('ID:') || /src/i.test(surrounding) || surrounding.includes('UUID')) return true;
 
         const lookbehind = context.substring(Math.max(0, pos - 50), pos).toLowerCase();
         const lookahead = context.substring(pos + searchStr.length, Math.min(context.length, pos + searchStr.length + 30)).toLowerCase();
@@ -296,7 +209,6 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
         if (lookbehind.includes('llama') || lookbehind.includes('llámanos') || lookbehind.includes('tel') || lookbehind.includes('phone') || lookbehind.includes('01 800') || lookbehind.includes('800')) return true;
         if (lookahead.includes('way') || lookahead.includes('ave') || lookahead.includes('st') || lookahead.includes('calle') || lookahead.includes('road')) return true;
 
-        // Check for common footer terms around the code to avoid 1570121-like leaks
         const footerTerms = ['derechos reservados', 'unsubscribe', 'privacidad', 'términos', 'copyright', 'inc.', 'privacy', 'src:', 'id:', 'uuid', '121 albright'];
         const contextAroundCode = context.substring(Math.max(0, pos - 150), Math.min(context.length, pos + searchStr.length + 150)).toLowerCase();
         if (footerTerms.some(term => contextAroundCode.includes(term))) return true;
@@ -304,38 +216,28 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
         return false;
     };
 
-    // 0. HTML Specific Search (High Confidence)
-    if (isHtml) {
-        const potentialCodes = Array.from(doc.querySelectorAll('td, span, div, b, strong, font'))
-            .filter(el => {
-                const txt = el.textContent.trim().replace(/\s+/g, '');
-                const style = el.getAttribute('style') || '';
-                const cls = el.className || '';
-                // Look for common code classes or letter-spacing
-                return (cls.includes('number') || cls.includes('code') || style.includes('letter-spacing')) && /^\d{4,8}$/.test(txt);
-            });
+    if (isHtml && doc) {
+        const potentialCodes = Array.from(doc.querySelectorAll('td, span, div, b, strong, font')).filter(el => {
+            const txt = (el.textContent || '').trim().replace(/\s+/g, '');
+            const style = el.getAttribute('style') || '';
+            const cls = el.className || '';
+            return (cls.includes('number') || cls.includes('code') || style.includes('letter-spacing')) && /^\d{4,8}$/.test(txt);
+        });
         if (potentialCodes.length > 0) {
-            foundCode = potentialCodes[0].textContent.trim().replace(/\s+/g, '');
+            foundCode = (potentialCodes[0].textContent || '').trim().replace(/\s+/g, '');
         }
     }
 
-    // 1. Proximity Match: Code AFTER keyword (High Priority)
     const afterRegex = /(?:código|code|confirmación|verific|acceso|pin|confirma|cambio).{0,400}?\b(\d{4,8})\b/i;
     const afterMatch = searchContext.match(afterRegex);
-    if (afterMatch && !foundCode && !isInvalidCode(afterMatch[1], searchContext)) {
-        foundCode = afterMatch[1];
-    }
+    if (afterMatch && !foundCode && !isInvalidCode(afterMatch[1], searchContext)) foundCode = afterMatch[1];
 
-    // 2. Proximity Match: Code BEFORE keyword
     if (!foundCode) {
         const beforeRegex = /\b(\d{4,8})\b.{0,60}?(?:código|code|confirmación|verific|es tu|is tu|confirma)/i;
         const beforeMatch = searchContext.match(beforeRegex);
-        if (beforeMatch && !isInvalidCode(beforeMatch[1], searchContext)) {
-            foundCode = beforeMatch[1];
-        }
+        if (beforeMatch && !isInvalidCode(beforeMatch[1], searchContext)) foundCode = beforeMatch[1];
     }
 
-    // 3. Fallback for spaced codes (Netflix: 1 2 3 4)
     if (!foundCode) {
         const spacedMatch = searchContext.match(/(?:código|code|confirmación|verific|confirma|cambio).{0,250}?\b((\d\s*){4,8})\b/i);
         if (spacedMatch) {
@@ -345,20 +247,16 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
         }
     }
 
-    // 4. Final Fallback: If email subject screams "code", grab the first valid 4-8 digit number
     if (!foundCode && /(código|code|verific|acceso|inicio|sesión|login|confirma|cambio)/i.test(subject)) {
         const allNums = searchContext.match(/\b\d{4,8}\b/g) || [];
         const valid = allNums.find(n => !isInvalidCode(n, searchContext));
         if (valid) foundCode = valid;
     }
 
-    // Smart Summary
-    let displaySnippet = msg.snippet;
+    let displaySnippet = msg.snippet || '';
     const lowerSub = subject.toLowerCase();
 
-    // Protection/Security alerts (Crunchyroll, Google, Vix, etc.)
     if (lowerSub.includes('accedida') || lowerSub.includes('inicio de sesión') || lowerSub.includes('inicia sesión') || lowerSub.includes('seguridad') || lowerSub.includes('verific') || lowerSub.includes('contraseña')) {
-        // Strict regex for Geography (excludes CSS media query leaks)
         const locationMatch = searchContext.match(/(?:Cerca de|Cerca|En)\s+(?!(?:and|min|max|width))\b([^,\|]{3,50}, [^,\|]{3,50}(?:, [^,\|]{3,50})?)/i);
         const accountMatch = searchContext.match(/(?:Cuenta de Google|la cuenta)\s+([^\s]+@gmail\.com)/i);
 
@@ -367,13 +265,12 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
         } else if (locationMatch && locationMatch[1].includes(',')) {
             displaySnippet = `Inicio detectado en: <strong>${locationMatch[1].trim()}</strong>`;
         } else if (lowerSub.includes('contraseña') || lowerSub.includes('password')) {
-            displaySnippet = `Actualización de seguridad confirmada`;
+            displaySnippet = 'Actualización de seguridad confirmada';
         } else if (lowerSub.includes('verific')) {
-            displaySnippet = `Confirmación: <strong>Escribe el código para validar</strong>`;
+            displaySnippet = 'Confirmación: <strong>Escribe el código para validar</strong>';
         }
     }
 
-    // Household/Access/Invitation specific logic (Netflix, Vix, etc.)
     if (lowerSub.includes('hogar') || lowerSub.includes('viaje') || lowerSub.includes('dispositivo') || lowerSub.includes('solicitaste') || lowerSub.includes('vix') || lowerSub.includes('unirse') || lowerSub.includes('tienes') || lowerSub.includes('inicio') || lowerSub.includes('temporal')) {
         const netflixMatch = searchContext.match(/(\w+) ha enviado una solicitud desde (?:el dispositivo )?([^|]+?)(?= a las| \||$)/i);
         const newNetflixMatch = searchContext.match(/Solicitud de (.*?), enviada desde:\s*([^,]+)/i);
@@ -384,7 +281,7 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
             const dev = deviceMatch ? deviceMatch[1].trim() : 'Dispositivo';
             displaySnippet = `Aprobar acceso: <strong>${dev}</strong>`;
         } else if (subject.includes('¡Casi lo tienes!')) {
-            displaySnippet = `Suscripción pendiente: <strong>Crea tu cuenta ahora</strong>`;
+            displaySnippet = 'Suscripción pendiente: <strong>Crea tu cuenta ahora</strong>';
         } else if (inviteMatch) {
             displaySnippet = `Invitación de: <strong>${inviteMatch[1].trim()}</strong>`;
         } else if (newNetflixMatch) {
@@ -392,22 +289,21 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
         } else if (netflixMatch) {
             displaySnippet = `<strong>${netflixMatch[1].trim()}</strong> solicitó desde <strong>${netflixMatch[2].trim()}</strong>`;
         } else if (!displaySnippet.includes('Inicio detectado') && !displaySnippet.includes('Verificando')) {
-            const deviceMatch = searchContext.match(/Dispositivo\s*(.*?)(?=\sFecha|\sHora|$)/i);
-            if (deviceMatch) displaySnippet = `Nuevo acceso en: <strong>${deviceMatch[1].trim()}</strong>`;
+            const dm = searchContext.match(/Dispositivo\s*(.*?)(?=\sFecha|\sHora|$)/i);
+            if (dm) displaySnippet = `Nuevo acceso en: <strong>${dm[1].trim()}</strong>`;
         }
     }
 
-    // Fallback: If snippet is empty or looks like placeholder, show full sender address
     let useFromAction = false;
-    const cleanSnippet = displaySnippet.replace(/&nbsp;/g, ' ').trim();
+    const cleanSnippet = (displaySnippet || '').replace(/&nbsp;/g, ' ').trim();
     if (!cleanSnippet || cleanSnippet === '...' || cleanSnippet.toLowerCase() === 'no snippet') {
-        displaySnippet = `<span style="opacity:0.6; font-size:0.75rem;">Remitente: ${from.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`;
+        const safeFrom = from.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        displaySnippet = `<span style="opacity:0.6; font-size:0.75rem;">Remitente: ${safeFrom}</span>`;
         useFromAction = true;
     }
 
     let mainAction = findMainAction(content, isHtml);
 
-    // If body was empty, force a "Copy Email" action
     if (useFromAction && !mainAction) {
         const emailOnly = from.match(/[^ <]+@[^ >]+/);
         if (emailOnly) {
@@ -426,7 +322,6 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
 
     let codeHtml = '';
     if (foundCode) {
-        // Code box is now directly clickable to copy, no extra button needed
         codeHtml = `
             <div class="code-box click-to-copy" style="background:rgba(18,140,126,0.3); border:1px solid rgba(18,140,126,0.8); cursor:pointer; display:inline-flex; align-items:center; height:30px; padding:0 12px; border-radius:8px;" title="Clic para copiar" onclick="event.stopPropagation(); copyToClipboard('${foundCode}', 'Código copiado')">
                 <span class="code-value" style="color:#fff; font-size:1.1rem; letter-spacing:3px;">${foundCode}</span>
@@ -443,31 +338,31 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
         const isCreate = mainAction.label === 'CREAR CUENTA';
         const isApprove = mainAction.label === 'APROBAR INICIO';
         const isRequest = mainAction.label === 'SOLICITAR CÓDIGO';
-        const isCopy = mainAction.isCopyEmail;
+        const isCopy = !!mainAction.isCopyEmail;
 
         let btnColor = 'var(--green)';
         let btnShadow = 'var(--green-glow)';
         let txtColor = '#000';
-        let clickAction = `event.stopPropagation()`;
+        let clickAction = 'event.stopPropagation()';
 
         if (mainAction.label === 'SÍ, LO SOLICITÉ YO' || mainAction.label === 'ACEPTAR INVITACIÓN' || isCreate || isApprove || isRequest) {
-            btnColor = '#e50914'; // Netflix Red
+            btnColor = '#e50914';
             btnShadow = 'rgba(229,9,20,0.4)';
         } else if (isProtection) {
-            btnColor = '#ff6600'; // Crunchyroll/Security Orange
+            btnColor = '#ff6600';
             btnShadow = 'rgba(255,102,0,0.4)';
         } else if (isBilling) {
-            btnColor = '#7d2ae8'; // Canva Purple
+            btnColor = '#7d2ae8';
             btnShadow = 'rgba(125,42,232,0.4)';
             txtColor = '#fff';
         } else if (isRenew) {
-            btnColor = '#00c9db'; // CapCut Cyan
+            btnColor = '#00c9db';
             btnShadow = 'rgba(0,201,219,0.4)';
         } else if (isLogin) {
-            btnColor = '#f35400'; // Vix Orange
+            btnColor = '#f35400';
             btnShadow = 'rgba(243,84,0,0.4)';
         } else if (isCopy) {
-            btnColor = '#3498db'; // Google Blue
+            btnColor = '#3498db';
             btnShadow = 'rgba(52,152,219,0.4)';
             txtColor = '#000';
             clickAction = `event.stopPropagation(); copyToClipboard('${mainAction.email}', 'Correo copiado')`;
@@ -476,8 +371,8 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
         const href = isCopy ? 'javascript:void(0)' : mainAction.url;
 
         actionHtml = `
-            <a href="${href}" target="${isCopy ? '' : '_blank'}" onclick="${clickAction}" style="display:inline-flex; align-items:center; justify-content:center; white-space:nowrap; height:30px; padding:0 12px; background:${btnColor}; border-radius:8px; font-size:0.7rem; font-weight:800; color:${txtColor}; text-decoration:none; box-shadow: 0 4px 10px ${btnShadow}; flex-shrink:0;">
-                ${mainAction.label.toUpperCase()}
+            <a href="${href}" target="${isCopy ? '' : '_blank'}" onclick="${clickAction}" style="display:inline-flex; align-items:center; justify-content:center; white-space:nowrap; height:30px; padding:0 12px; background:${btnColor}; border-radius:8px; font-size:0.7rem; font-weight:800; color:${txtColor}; text-decoration:none; box-shadow:0 4px 10px ${btnShadow}; flex-shrink:0;">
+                ${String(mainAction.label || '').toUpperCase()}
             </a>
         `;
     }
@@ -490,7 +385,7 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
             </div>
         </div>
         <div class="email-subject" style="pointer-events:none;">${subject}</div>
-        
+
         <div class="card-summary">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:nowrap;">
                 <div class="email-snippet" style="pointer-events:none; margin-bottom:0; flex-grow:1; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${displaySnippet}</div>
@@ -500,12 +395,12 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
                 </div>
             </div>
         </div>
-        
-        <div class="msg-body" style="display:none; transition: all 0.3s; margin-top:10px; background:#fff; border-radius:12px; overflow:hidden;">
-            ${isHtml ?
-            `<iframe id="iframe-${msg.id}" style="width:100%; border:none; background:#fff; min-height:500px; display:block;"></iframe>` :
-            `<div style="padding:16px; color:#333; background:#fff;">${formatBodyWithLinks(content)}</div>`
-        }
+
+        <div class="msg-body" style="display:none; transition:all 0.3s; margin-top:10px; background:#fff; border-radius:12px; overflow:hidden;">
+            ${isHtml
+                ? `<iframe id="iframe-${msg.id}" style="width:100%; border:none; background:#fff; min-height:500px; display:block;"></iframe>`
+                : `<div style="padding:16px; color:#333; background:#fff;">${formatBodyWithLinks(content)}</div>`
+            }
         </div>
         <div class="card-indicator">▼</div>
     `;
@@ -520,59 +415,86 @@ function renderEmail(msg, prepend = false, animIndex = 0, highlightAsNew = false
 
     if (isHtml) {
         const iframe = document.getElementById('iframe-' + msg.id);
-        const doc = iframe.contentWindow.document;
-        doc.open();
-        doc.write(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <base target="_blank">
-                <style>
-                    body { font-family: sans-serif; margin: 15px; color: #333; line-height: 1.5; background: #fff; }
-                    img { max-width: 100% !important; height: auto !important; }
-                    a { color: #128c7e; }
-                </style>
-            </head>
-            <body>${content}</body>
-            </html>
-        `);
-        doc.close();
+        if (iframe) renderHtmlInIframe(iframe, content);
     }
 }
 
-// ─── UTILS ───────────────────────────────────────────────────────────────────
+function renderHtmlInIframe(iframe, html) {
+    if (!iframe || !iframe.contentWindow) return;
+    const raw = String(html || '');
+    const hasHtmlShell = /<html[\s>]/i.test(raw) || /<body[\s>]/i.test(raw);
+    const docHtml = hasHtmlShell
+        ? raw
+        : `<!DOCTYPE html><html><head><base target="_blank"></head><body>${raw}</body></html>`;
 
-function extractBody(payload) {
-    // Collect all parts
+    const iframeDoc = iframe.contentWindow.document;
+    iframeDoc.open();
+    iframeDoc.write(docHtml);
+    iframeDoc.close();
+
+    const resize = () => {
+        try {
+            const d = iframe.contentWindow.document;
+            const h = Math.max(
+                (d.body && d.body.scrollHeight) || 0,
+                (d.documentElement && d.documentElement.scrollHeight) || 0,
+                420
+            );
+            iframe.style.height = `${h}px`;
+        } catch (_) {
+            iframe.style.height = '500px';
+        }
+    };
+
+    resize();
+    setTimeout(resize, 150);
+    setTimeout(resize, 700);
+}
+
+function extractBody(input) {
+    if (!input) return { content: 'Cuerpo del mensaje no disponible.', isHtml: false };
+
+    if (input.gasHtmlBody) return { content: input.gasHtmlBody, isHtml: true };
+    if (input.gasPlainBody) return { content: input.gasPlainBody, isHtml: false };
+
+    const payload = input.payload ? input.payload : input;
+
     let htmlPart = null;
     let plainPart = null;
 
     function findParts(p) {
-        if (p.mimeType === 'text/html') htmlPart = p.body.data;
-        if (p.mimeType === 'text/plain') plainPart = p.body.data;
-        if (p.parts) p.parts.forEach(findParts);
+        if (!p) return;
+        if (p.mimeType === 'text/html' && p.body && p.body.data) htmlPart = p.body.data;
+        if (p.mimeType === 'text/plain' && p.body && p.body.data) plainPart = p.body.data;
+        if (Array.isArray(p.parts)) p.parts.forEach(findParts);
     }
 
     findParts(payload);
 
     if (htmlPart) return { content: decodeB64(htmlPart), isHtml: true };
     if (plainPart) return { content: decodeB64(plainPart), isHtml: false };
+    if (payload && payload.body && payload.body.data) return { content: decodeB64(payload.body.data), isHtml: false };
 
     return { content: 'Cuerpo del mensaje no disponible.', isHtml: false };
 }
 
 function decodeB64(str) {
     try {
-        const raw = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+        const raw = atob((str || '').replace(/-/g, '+').replace(/_/g, '/'));
         const bytes = new Uint8Array(raw.length);
         for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
         return new TextDecoder().decode(bytes);
-    } catch (e) { return 'Error de decodificación.'; }
+    } catch (_) {
+        return 'Error de decodificación.';
+    }
 }
 
 function formatBodyWithLinks(text) {
-    const urlPattern = /(https?:\/\/[^\s]+)/g;
-    return text.replace(urlPattern, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+    const safe = String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    return safe.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 
 function toggleBody(item) {
@@ -605,7 +527,6 @@ function updateResultsMaxInfo(maxValue) {
     info.textContent = `MAX: ${maxValue}`;
 }
 
-// Manual extractor based on keywords
 function findMainAction(content, isHtml) {
     const rules = [
         { label: 'SÍ, LO SOLICITÉ YO', regex: /sí, lo solicit[eé] yo|sí, he sido yo|sí, la envi[eé] yo|confirmar solicitud/i },
@@ -620,7 +541,6 @@ function findMainAction(content, isHtml) {
         { label: 'CAMBIAR CONTRASEÑA', regex: /cambi.* contraseña|change password|reset password/i },
         { label: 'GESTIONAR HOGAR', regex: /administrar hogar|configurar hogar|manage household|gestion de hogar/i },
         { label: 'GESTIONAR ACCESO', regex: /gestionar el acceso|comprueba qué dispositivos|manage access/i },
-        { label: 'VERIFICAR CUENTA', regex: /verificar cuenta|confirmar correo|verify account|confirm email/i },
         { label: 'REESTABLECER', regex: /restablecer|recuperar|reset|recover/i }
     ];
 
@@ -641,7 +561,7 @@ function findMainAction(content, isHtml) {
             }
         }
     } else {
-        const lines = content.split('\n');
+        const lines = String(content || '').split('\n');
         for (const rule of rules) {
             const lineIdx = lines.findIndex(l => rule.regex.test(l));
             if (lineIdx !== -1) {
@@ -675,74 +595,6 @@ function showToast(text, type = 'error') {
     setTimeout(() => t.classList.remove('show'), 3500);
 }
 
-function saveConfigs() {
-    const cid = clientIdInput.value.trim();
-    if (cid) localStorage.setItem(SK_CID, cid);
-    banner.style.display = 'none';
-    showToast('Configuracion guardada', 'success');
-    if (window.google) initTokenClient();
-}
-
-function clearConfigs() {
-    localStorage.removeItem(SK_CID);
-    clientIdInput.value = '';
-    showToast('Configuración eliminada', 'error');
-}
-
-function toggleConfig() {
-    if (!banner) return;
-    banner.style.display = (banner.style.display === 'none' || !banner.style.display) ? 'block' : 'none';
-    if (banner.style.display === 'block') banner.scrollIntoView({ behavior: 'smooth' });
-}
-
-// ─── INITIALIZATION ──────────────────────────────────────────────────────────
-
-document.addEventListener('DOMContentLoaded', () => {
-    // Cache DOM
-    resultsContainer = document.getElementById('resultsContainer');
-    loader = document.getElementById('loader');
-    submitBtn = document.getElementById('submitBtn');
-    filterInput = document.getElementById('filterEmail');
-    authBtn = document.getElementById('authBtn');
-    defaultAuthBtnHtml = authBtn ? authBtn.innerHTML : '';
-    authText = document.getElementById('authStatus');
-    banner = document.getElementById('config-banner');
-    clientIdInput = document.getElementById('clientIdInput');
-    backToTopBtn = document.getElementById('backToTopBtn');
-    clearFilterBtn = document.getElementById('clearFilterBtn');
-    const maxResultsInput = document.getElementById('maxResultsInput');
-
-    document.getElementById('showOrigin').textContent = location.origin;
-    clientIdInput.value = getSavedClientId();
-
-    // Check local session
-    if (isTokenValid()) {
-        accessToken = localStorage.getItem(SK_ACCESS);
-        onAuthed();
-        if (isTokenExpiringSoon(180000)) refreshAccessTokenSilently();
-    }
-
-    // Load GIS
-    if (window.google) initTokenClient();
-
-    if (backToTopBtn) {
-        backToTopBtn.addEventListener('click', () => {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-    }
-    if (filterInput && clearFilterBtn) {
-        filterInput.addEventListener('input', updateClearFilterVisibility);
-        updateClearFilterVisibility();
-    }
-    if (maxResultsInput) {
-        maxResultsInput.addEventListener('input', () => updateResultsMaxInfo(maxResultsInput.value || 10));
-        updateResultsMaxInfo(maxResultsInput.value || 10);
-    }
-    window.addEventListener('scroll', updateBackToTopVisibility, { passive: true });
-    updateBackToTopVisibility();
-});
-
-// Helper for UI paste
 window.pasteFromClipboard = function () {
     navigator.clipboard.readText().then(text => {
         const clean = text.trim();
@@ -769,12 +621,47 @@ function updateClearFilterVisibility() {
     clearFilterBtn.classList.toggle('show', show);
 }
 
-document.getElementById('filterEmail').addEventListener('paste', () => {
-    setTimeout(() => {
+document.addEventListener('DOMContentLoaded', () => {
+    resultsContainer = document.getElementById('resultsContainer');
+    loader = document.getElementById('loader');
+    submitBtn = document.getElementById('submitBtn');
+    filterInput = document.getElementById('filterEmail');
+    backToTopBtn = document.getElementById('backToTopBtn');
+    clearFilterBtn = document.getElementById('clearFilterBtn');
+    const maxResultsInput = document.getElementById('maxResultsInput');
+
+    const gas = ensureGasConfigOnFirstVisit();
+    if (!gas.url || !gas.token) {
+        showToast('Falta URL/token de Apps Script para buscar correos', 'error');
+    }
+
+    if (backToTopBtn) {
+        backToTopBtn.addEventListener('click', () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+    }
+    window.addEventListener('scroll', updateBackToTopVisibility, { passive: true });
+    updateBackToTopVisibility();
+
+    if (filterInput && clearFilterBtn) {
+        filterInput.addEventListener('input', updateClearFilterVisibility);
         updateClearFilterVisibility();
-        const clean = filterInput.value.trim();
-        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
-            searchMails();
-        }
-    }, 100);
+    }
+    if (maxResultsInput) {
+        maxResultsInput.addEventListener('input', () => updateResultsMaxInfo(maxResultsInput.value || 10));
+        updateResultsMaxInfo(maxResultsInput.value || 10);
+    }
+    if (submitBtn) {
+        submitBtn.addEventListener('click', () => searchMails());
+    }
+
+    if (filterInput) {
+        filterInput.addEventListener('paste', () => {
+            setTimeout(() => {
+                updateClearFilterVisibility();
+                const clean = filterInput.value.trim();
+                if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) searchMails();
+            }, 100);
+        });
+    }
 });
