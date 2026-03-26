@@ -7,6 +7,8 @@ Configura estas variables en `Site settings -> Environment variables`:
 - `SESSION_SECRET`: secreto largo y aleatorio (ejemplo 64+ caracteres).
 - `GAS_URL`: URL de tu Web App de Apps Script.
 - `GAS_TOKEN`: token secreto de Apps Script.
+- `CORS_ALLOWED_ORIGINS`: lista de origenes permitidos separada por coma.
+  ejemplo: `https://artproducer.github.io,https://marvelous-salmiakki-382f32.netlify.app`
 
 ## Flujo
 

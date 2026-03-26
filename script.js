@@ -1,9 +1,12 @@
 ﻿/**
  * Consulta Inbox - Netlify Functions + sesion por contrasena
  */
-const LOGIN_ENDPOINT = '/.netlify/functions/login';
-const INBOX_ENDPOINT = '/.netlify/functions/inbox';
-const LOGOUT_ENDPOINT = '/.netlify/functions/logout';
+const NETLIFY_API_BASE = 'https://marvelous-salmiakki-382f32.netlify.app';
+const IS_GITHUB_PAGES = /github\.io$/i.test(window.location.hostname);
+const API_BASE = IS_GITHUB_PAGES ? NETLIFY_API_BASE : '';
+const LOGIN_ENDPOINT = `${API_BASE}/.netlify/functions/login`;
+const INBOX_ENDPOINT = `${API_BASE}/.netlify/functions/inbox`;
+const LOGOUT_ENDPOINT = `${API_BASE}/.netlify/functions/logout`;
 const POLL_INTERVAL_MS = 700;
 let isSearching = false;
 let pollingInterval = null;

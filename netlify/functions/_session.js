@@ -82,11 +82,12 @@ function verifySessionToken(token, secret) {
 }
 
 function buildSessionCookie(token, ttlSeconds) {
-  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${ttlSeconds}`;
+  // SameSite=None is required for cross-site cookies (GitHub Pages -> Netlify).
+  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${ttlSeconds}`;
 }
 
 function buildLogoutCookie() {
-  return `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  return `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
 }
 
 module.exports = {

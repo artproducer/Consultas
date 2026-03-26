@@ -1,4 +1,5 @@
-﻿const { buildLogoutCookie } = require('./_session');
+const { buildLogoutCookie } = require('./_session');
+const { getCorsHeaders } = require('./_cors');
 
 function json(statusCode, payload, extraHeaders = {}) {
   return {
@@ -12,6 +13,23 @@ function json(statusCode, payload, extraHeaders = {}) {
   };
 }
 
-exports.handler = async () => {
-  return json(200, { ok: true }, { 'Set-Cookie': buildLogoutCookie() });
+exports.handler = async (event) => {
+  const cors = getCorsHeaders(event && event.headers && event.headers.origin);
+
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 204,
+      headers: {
+        'Cache-Control': 'no-store',
+        ...cors
+      },
+      body: ''
+    };
+  }
+
+  if (event.headers && event.headers.origin && !cors['Access-Control-Allow-Origin']) {
+    return json(403, { ok: false, error: 'Origen no permitido' });
+  }
+
+  return json(200, { ok: true }, { 'Set-Cookie': buildLogoutCookie(), ...cors });
 };

@@ -1,8 +1,9 @@
-﻿const {
+const {
   timingSafeEqualStr,
   createSessionToken,
   buildSessionCookie
 } = require('./_session');
+const { getCorsHeaders } = require('./_cors');
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 365; // 365 dias
 
@@ -19,27 +20,44 @@ function json(statusCode, payload, extraHeaders = {}) {
 }
 
 exports.handler = async (event) => {
+  const cors = getCorsHeaders(event && event.headers && event.headers.origin);
+
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 204,
+      headers: {
+        'Cache-Control': 'no-store',
+        ...cors
+      },
+      body: ''
+    };
+  }
+
+  if (event.headers && event.headers.origin && !cors['Access-Control-Allow-Origin']) {
+    return json(403, { ok: false, error: 'Origen no permitido' });
+  }
+
   if (event.httpMethod !== 'POST') {
-    return json(405, { ok: false, error: 'Metodo no permitido' });
+    return json(405, { ok: false, error: 'Metodo no permitido' }, cors);
   }
 
   const appPassword = process.env.APP_PASSWORD || '';
   const sessionSecret = process.env.SESSION_SECRET || '';
 
   if (!appPassword || !sessionSecret) {
-    return json(500, { ok: false, error: 'Faltan variables de entorno' });
+    return json(500, { ok: false, error: 'Faltan variables de entorno' }, cors);
   }
 
   let body = {};
   try {
     body = JSON.parse(event.body || '{}');
   } catch (_) {
-    return json(400, { ok: false, error: 'Body invalido' });
+    return json(400, { ok: false, error: 'Body invalido' }, cors);
   }
 
   const password = String(body.password || '');
   if (!password || !timingSafeEqualStr(password, appPassword)) {
-    return json(401, { ok: false, error: 'Credenciales invalidas' });
+    return json(401, { ok: false, error: 'Credenciales invalidas' }, cors);
   }
 
   const token = createSessionToken(sessionSecret, SESSION_TTL_SECONDS);
@@ -48,6 +66,6 @@ exports.handler = async (event) => {
   return json(
     200,
     { ok: true, ttl: SESSION_TTL_SECONDS },
-    { 'Set-Cookie': cookie }
+    { 'Set-Cookie': cookie, ...cors }
   );
 };
