@@ -37,6 +37,10 @@ body {
     overflow-x: hidden;
 }
 
+body.modal-open {
+    overflow: hidden;
+}
+
 .wrap {
     width: 100%;
     max-width: 900px;
@@ -51,6 +55,7 @@ body {
     text-align: center;
     margin-bottom: 8px;
     padding: 10px 0;
+    position: relative;
 }
 
 .header h1 {
@@ -63,6 +68,30 @@ body {
 .header h1 em {
     font-style: normal;
     color: var(--accent);
+}
+
+.session-btn {
+    position: absolute;
+    top: 6px;
+    right: 0;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border2);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-dim);
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+}
+
+.session-btn:hover {
+    color: #fff;
+    border-color: rgba(239, 68, 68, 0.5);
+    background: rgba(239, 68, 68, 0.18);
 }
 
 /* Auth Card & Main Card */
@@ -549,6 +578,73 @@ body {
 #toast.error { border-color: rgba(239, 68, 68, 0.4); color: var(--danger); background: #1a1010; }
 #toast.success { border-color: rgba(34, 197, 94, 0.4); color: var(--green); background: #0e1a12; }
 
+.config-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2200;
+    background: rgba(4, 7, 9, 0.82);
+    backdrop-filter: blur(8px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.config-modal.show {
+    display: flex;
+}
+
+.config-modal-card {
+    width: 100%;
+    max-width: 460px;
+    background: linear-gradient(180deg, rgba(22, 24, 25, 0.98) 0%, rgba(15, 17, 18, 0.98) 100%);
+    border: 1px solid var(--border2);
+    border-radius: 22px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+    padding: 24px;
+}
+
+.config-modal-card h3 {
+    font-size: 1.25rem;
+    color: #fff;
+    margin-bottom: 8px;
+}
+
+.config-modal-card p {
+    font-size: 0.86rem;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+}
+
+#configLoginForm {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+#configLoginForm input {
+    width: 100%;
+    height: 46px;
+    padding: 0 14px;
+    font-size: 0.9rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    outline: none;
+    font-family: 'DM Sans', sans-serif;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+#configLoginForm input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.config-login-btn {
+    margin-top: 4px;
+}
+
 .back-to-top {
     position: fixed;
     right: 18px;
@@ -592,6 +688,7 @@ body {
 @media (max-width: 480px) {
     body { padding: 12px 10px; }
     .header h1 { font-size: 1.2rem; }
+    .session-btn { position: static; margin-top: 10px; }
     .card { padding: 16px; border-radius: 16px; }
     .email-item { padding: 14px; border-radius: 14px; }
     .email-subject { font-size: 0.9rem; }

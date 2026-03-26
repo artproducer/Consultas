@@ -22,27 +22,131 @@ let submitBtn;
 let filterInput;
 let backToTopBtn;
 let clearFilterBtn;
+let configLogoutBtn;
+let configModal;
+let configLoginForm;
+let configUrlInput;
+let configTokenInput;
+let configLoginPromise = null;
 
 function getGasConfig() {
     const cfg = window.__APP_CONFIG__ || {};
-    const url = (cfg.gasUrl || localStorage.getItem(SK_GAS_URL) || GAS_WEB_APP_URL || '').trim();
-    const token = (cfg.gasToken || localStorage.getItem(SK_GAS_TOKEN) || GAS_SECRET_TOKEN || '').trim();
+    const url = (localStorage.getItem(SK_GAS_URL) || cfg.gasUrl || GAS_WEB_APP_URL || '').trim();
+    const token = (localStorage.getItem(SK_GAS_TOKEN) || cfg.gasToken || GAS_SECRET_TOKEN || '').trim();
     return { url, token };
 }
 
-function ensureGasConfigOnFirstVisit() {
+async function ensureGasConfigOnFirstVisit() {
     const current = getGasConfig();
     if (current.url && current.token) return current;
 
-    const enteredUrl = current.url || (prompt('Pega la URL de tu Web App de Apps Script:') || '').trim();
-    if (!enteredUrl) return { url: current.url || '', token: current.token || '' };
+    if (configLoginPromise) return configLoginPromise;
+    configLoginPromise = openConfigLogin(current).finally(() => {
+        configLoginPromise = null;
+    });
+    return configLoginPromise;
+}
 
-    const enteredToken = current.token || (prompt('Pega tu token secreto de Apps Script:') || '').trim();
-    if (!enteredToken) return { url: enteredUrl, token: current.token || '' };
+function openConfigLogin(initial) {
+    return new Promise((resolve) => {
+        if (!configModal || !configLoginForm || !configUrlInput || !configTokenInput) {
+            resolve(initial || { url: '', token: '' });
+            return;
+        }
 
-    if (!current.url) localStorage.setItem(SK_GAS_URL, enteredUrl);
-    if (!current.token) localStorage.setItem(SK_GAS_TOKEN, enteredToken);
-    return { url: enteredUrl, token: enteredToken };
+        const startUrl = initial.url || '';
+        const startToken = initial.token || '';
+        configUrlInput.value = startUrl;
+        configTokenInput.value = startToken;
+        configUrlInput.readOnly = false;
+
+        configModal.classList.add('show');
+        configModal.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('modal-open');
+
+        if (startToken) configTokenInput.focus();
+        else configUrlInput.focus();
+
+        const onSubmit = async (e) => {
+            e.preventDefault();
+            const url = (configUrlInput.value || '').trim();
+            const token = (configTokenInput.value || '').trim();
+            const submit = configLoginForm.querySelector('button[type="submit"]');
+            const originalText = submit ? submit.textContent : '';
+
+            if (!url || !/^https?:\/\//i.test(url)) {
+                showToast('URL inválida', 'error');
+                return;
+            }
+            if (!token) {
+                showToast('Ingresa el token', 'error');
+                return;
+            }
+
+            try {
+                if (submit) {
+                    submit.disabled = true;
+                    submit.textContent = 'Validando...';
+                }
+
+                await validateGasConfig(url, token);
+                localStorage.setItem(SK_GAS_URL, url);
+                localStorage.setItem(SK_GAS_TOKEN, token);
+            } catch (err) {
+                showToast(err.message || 'No se pudo validar la conexión', 'error');
+                return;
+            } finally {
+                if (submit) {
+                    submit.disabled = false;
+                    submit.textContent = originalText || 'Entrar';
+                }
+            }
+
+            configModal.classList.remove('show');
+            configModal.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('modal-open');
+            configLoginForm.removeEventListener('submit', onSubmit);
+            resolve({ url, token });
+        };
+
+        configLoginForm.addEventListener('submit', onSubmit);
+    });
+}
+
+async function validateGasConfig(url, token) {
+    let res;
+    try {
+        const qs = new URLSearchParams({ action: 'ping', token });
+        res = await fetch(`${url}?${qs.toString()}`);
+    } catch (_) {
+        throw new Error('No se pudo conectar con esa URL');
+    }
+    if (!res.ok) {
+        throw new Error('La URL no respondió correctamente');
+    }
+    let payload = null;
+    try {
+        payload = await res.json();
+    } catch (_) {
+        throw new Error('La respuesta del servidor no es válida');
+    }
+    if (!payload || payload.ok !== true || payload.pong !== true) {
+        throw new Error((payload && payload.error) ? payload.error : 'Token o URL inválidos');
+    }
+}
+
+async function resetGasSession() {
+    localStorage.removeItem(SK_GAS_URL);
+    localStorage.removeItem(SK_GAS_TOKEN);
+    activeFilterTerm = '';
+    renderedMessageIds.clear();
+    latestSeenInternalDate = 0;
+    resultsContainer.innerHTML = '';
+    if (pollingInterval) clearInterval(pollingInterval);
+    const live = document.getElementById('liveStatus');
+    if (live) live.style.display = 'none';
+    showToast('Sesión cerrada', 'success');
+    await ensureGasConfigOnFirstVisit();
 }
 
 function encodeB64Url(text) {
@@ -98,11 +202,18 @@ async function searchMails(isSilent = false) {
     }
 
     try {
+        let gas = getGasConfig();
+        if ((!gas.url || !gas.token) && !isSilent) {
+            await ensureGasConfigOnFirstVisit();
+            gas = getGasConfig();
+        }
+        if (!gas.url || !gas.token) {
+            if (!isSilent) showToast('Falta configurar Apps Script URL/Token.', 'error');
+            return;
+        }
+
         const maxLimit = document.getElementById('maxResultsInput').value || 10;
         updateResultsMaxInfo(maxLimit);
-
-        const gas = getGasConfig();
-        if (!gas.url || !gas.token) throw new Error('Falta configurar Apps Script URL/Token.');
 
         const qs = new URLSearchParams({
             action: 'search',
@@ -142,7 +253,14 @@ async function searchMails(isSilent = false) {
             renderEmail(msg, true, i, shouldHighlightNew);
         }
     } catch (err) {
-        if (!isSilent) showToast(err.message || 'Error', 'error');
+        const msg = err.message || 'Error';
+        if (!isSilent && /no autorizado|autorizado|token/i.test(msg.toLowerCase())) {
+            localStorage.removeItem(SK_GAS_TOKEN);
+            showToast('Token inválido. Inicia sesión de nuevo.', 'error');
+            await ensureGasConfigOnFirstVisit();
+            return;
+        }
+        if (!isSilent) showToast(msg, 'error');
     } finally {
         if (!isSilent) setLoading(false);
         else isSearching = false;
@@ -621,16 +739,21 @@ function updateClearFilterVisibility() {
     clearFilterBtn.classList.toggle('show', show);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     resultsContainer = document.getElementById('resultsContainer');
     loader = document.getElementById('loader');
     submitBtn = document.getElementById('submitBtn');
     filterInput = document.getElementById('filterEmail');
     backToTopBtn = document.getElementById('backToTopBtn');
     clearFilterBtn = document.getElementById('clearFilterBtn');
+    configLogoutBtn = document.getElementById('configLogoutBtn');
+    configModal = document.getElementById('configLoginModal');
+    configLoginForm = document.getElementById('configLoginForm');
+    configUrlInput = document.getElementById('configUrlInput');
+    configTokenInput = document.getElementById('configTokenInput');
     const maxResultsInput = document.getElementById('maxResultsInput');
 
-    const gas = ensureGasConfigOnFirstVisit();
+    const gas = await ensureGasConfigOnFirstVisit();
     if (!gas.url || !gas.token) {
         showToast('Falta URL/token de Apps Script para buscar correos', 'error');
     }
@@ -653,6 +776,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (submitBtn) {
         submitBtn.addEventListener('click', () => searchMails());
+    }
+    if (configLogoutBtn) {
+        configLogoutBtn.addEventListener('click', () => {
+            resetGasSession();
+        });
     }
 
     if (filterInput) {
