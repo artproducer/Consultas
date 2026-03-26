@@ -18,9 +18,6 @@ function allowedOriginsFromEnv() {
   list.push(normalize(process.env.URL));
   list.push(normalize(process.env.DEPLOY_PRIME_URL));
 
-  // Safe fallback for this repo owner on GitHub Pages.
-  list.push('https://artproducer.github.io');
-
   return unique(list);
 }
 

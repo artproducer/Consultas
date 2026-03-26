@@ -8,12 +8,12 @@ Configura estas variables en `Site settings -> Environment variables`:
 - `GAS_URL`: URL de tu Web App de Apps Script.
 - `GAS_TOKEN`: token secreto de Apps Script.
 - `CORS_ALLOWED_ORIGINS`: lista de origenes permitidos separada por coma.
-  ejemplo: `https://artproducer.github.io,https://marvelous-salmiakki-382f32.netlify.app`
+  ejemplo: `https://TU-USUARIO.github.io,https://TU-SITIO.netlify.app`
 
 ## Flujo
 
 - Frontend inicia sesión contra `/.netlify/functions/login`.
-- Netlify Functions crea cookie `HttpOnly` (`inbox_session`) por 30 días.
+- Netlify Functions crea cookie `HttpOnly` (`inbox_session`) por 365 días.
 - Frontend consulta correos por `/.netlify/functions/inbox`.
 - Backend llama a GAS con `GAS_URL` + `GAS_TOKEN`.
 
