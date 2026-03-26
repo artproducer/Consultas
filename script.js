@@ -5,11 +5,9 @@
 
 const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxpmIstAMA8DUP5gXgAiFWPYlNT8u6s0iIpyINcXunkuJKEEVjGFjjkyizrysHjwfKl/exec';
 const GAS_SECRET_TOKEN = '';
-const POLL_INTERVAL_MS = 700;
 const SK_GAS_TOKEN = 'query_gas_token';
 
 let isSearching = false;
-let pollingInterval = null;
 let renderedMessageIds = new Set();
 let latestSeenInternalDate = 0;
 let activeSearchSeq = 0;
@@ -18,6 +16,7 @@ let activeFilterTerm = '';
 let resultsContainer;
 let loader;
 let submitBtn;
+let refreshBtn;
 let filterInput;
 let backToTopBtn;
 let clearFilterBtn;
@@ -134,9 +133,6 @@ async function resetGasSession() {
     renderedMessageIds.clear();
     latestSeenInternalDate = 0;
     resultsContainer.innerHTML = '';
-    if (pollingInterval) clearInterval(pollingInterval);
-    const live = document.getElementById('liveStatus');
-    if (live) live.style.display = 'none';
     showToast('Sesión cerrada', 'success');
     await ensureGasConfigOnFirstVisit();
 }
@@ -173,22 +169,33 @@ function mapGasItemToMessage(item) {
     };
 }
 
-async function searchMails(isSilent = false) {
+function isDailyQuotaError(message) {
+    const msg = String(message || '').toLowerCase();
+    return msg.includes('servicio solicitado demasiadas veces para un mismo día')
+        || msg.includes('too many times for one day')
+        || msg.includes('quota')
+        || msg.includes('rate limit');
+}
+
+async function searchMails(isSilent = false, preserveCurrentList = false) {
     if (isSearching) return;
 
     const filter = isSilent ? activeFilterTerm : filterInput.value.trim();
     if (!filter) return;
     const localSeq = isSilent ? activeSearchSeq : (++activeSearchSeq);
+    const canPreserve = !isSilent
+        && preserveCurrentList
+        && filter === activeFilterTerm
+        && renderedMessageIds.size > 0;
 
     if (!isSilent) {
-        if (pollingInterval) clearInterval(pollingInterval);
         setLoading(true);
         activeFilterTerm = filter;
-        resultsContainer.innerHTML = '';
-        renderedMessageIds.clear();
-        latestSeenInternalDate = 0;
-        const live = document.getElementById('liveStatus');
-        if (live) live.style.display = 'none';
+        if (!canPreserve) {
+            resultsContainer.innerHTML = '';
+            renderedMessageIds.clear();
+            latestSeenInternalDate = 0;
+        }
     } else {
         isSearching = true;
     }
@@ -204,7 +211,7 @@ async function searchMails(isSilent = false) {
             return;
         }
 
-        const maxLimit = document.getElementById('maxResultsInput').value || 10;
+        const maxLimit = document.getElementById('maxResultsInput').value || 5;
         updateResultsMaxInfo(maxLimit);
 
         const qs = new URLSearchParams({
@@ -223,29 +230,41 @@ async function searchMails(isSilent = false) {
         const items = Array.isArray(payload.items) ? payload.items : [];
         if (items.length === 0) {
             if (!isSilent) {
-                resultsContainer.innerHTML = `
-                    <div style="text-align:center; padding:40px; border-radius:18px; border:1px dashed var(--border);">
-                        <div style="font-size:0.9rem; font-weight:600; color:var(--text); margin-bottom:8px;">No se encontraron resultados</div>
-                    </div>
-                `;
+                if (canPreserve) {
+                    showToast('No hay correos nuevos', 'success');
+                } else {
+                    resultsContainer.innerHTML = `
+                        <div style="text-align:center; padding:40px; border-radius:18px; border:1px dashed var(--border);">
+                            <div style="font-size:0.9rem; font-weight:600; color:var(--text); margin-bottom:8px;">No se encontraron resultados</div>
+                        </div>
+                    `;
+                }
             }
             return;
         }
 
         const newBatch = items.filter(m => !renderedMessageIds.has(m.id)).reverse();
+        if (!isSilent && canPreserve && newBatch.length === 0) {
+            showToast('No hay correos nuevos', 'success');
+            return;
+        }
 
         for (let i = 0; i < newBatch.length; i++) {
             if (localSeq !== activeSearchSeq || filter !== activeFilterTerm) return;
 
             const msg = mapGasItemToMessage(newBatch[i]);
             const msgInternalDate = Number(msg.internalDate || 0);
-            const shouldHighlightNew = isSilent && msgInternalDate > latestSeenInternalDate;
+            const shouldHighlightNew = (isSilent || canPreserve) && msgInternalDate > latestSeenInternalDate;
             latestSeenInternalDate = Math.max(latestSeenInternalDate, msgInternalDate);
             renderedMessageIds.add(newBatch[i].id);
             renderEmail(msg, true, i, shouldHighlightNew);
         }
     } catch (err) {
         const msg = err.message || 'Error';
+        if (isDailyQuotaError(msg)) {
+            showToast('Límite diario de Gmail alcanzado. Usa Recargar manualmente más tarde.', 'error');
+            return;
+        }
         if (!isSilent && /no autorizado|autorizado|token/i.test(msg.toLowerCase())) {
             localStorage.removeItem(SK_GAS_TOKEN);
             showToast('Token inválido. Inicia sesión de nuevo.', 'error');
@@ -256,19 +275,7 @@ async function searchMails(isSilent = false) {
     } finally {
         if (!isSilent) setLoading(false);
         else isSearching = false;
-        if (!isSilent) startPolling();
     }
-}
-
-function startPolling() {
-    if (pollingInterval) clearInterval(pollingInterval);
-    const live = document.getElementById('liveStatus');
-    if (live) live.style.display = 'inline-flex';
-    pollingInterval = setInterval(() => {
-        const filter = activeFilterTerm.trim();
-        if (!filter) return;
-        if (!isSearching) searchMails(true);
-    }, POLL_INTERVAL_MS);
 }
 
 function renderEmail(msg, prepend = false, _animIndex = 0, highlightAsNew = false) {
@@ -695,6 +702,7 @@ function setLoading(on) {
     isSearching = on;
     loader.style.display = on ? 'flex' : 'none';
     submitBtn.disabled = on;
+    if (refreshBtn) refreshBtn.disabled = on;
     submitBtn.textContent = on ? 'Buscando...' : 'Buscar Correos';
 }
 
@@ -725,6 +733,20 @@ window.clearFilterInput = function () {
     updateClearFilterVisibility();
 };
 
+window.refreshMails = function () {
+    if (!filterInput) return;
+    const typed = filterInput.value.trim();
+    if (!typed && activeFilterTerm) {
+        filterInput.value = activeFilterTerm;
+        updateClearFilterVisibility();
+    }
+    if (!filterInput.value.trim()) {
+        showToast('Ingresa un correo para recargar', 'error');
+        return;
+    }
+    searchMails(false, true);
+};
+
 function updateClearFilterVisibility() {
     if (!clearFilterBtn || !filterInput) return;
     const show = filterInput.value.trim().length > 0;
@@ -735,6 +757,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     resultsContainer = document.getElementById('resultsContainer');
     loader = document.getElementById('loader');
     submitBtn = document.getElementById('submitBtn');
+    refreshBtn = document.getElementById('refreshBtn');
     filterInput = document.getElementById('filterEmail');
     backToTopBtn = document.getElementById('backToTopBtn');
     clearFilterBtn = document.getElementById('clearFilterBtn');
@@ -743,11 +766,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     configLoginForm = document.getElementById('configLoginForm');
     configTokenInput = document.getElementById('configTokenInput');
     const maxResultsInput = document.getElementById('maxResultsInput');
-
-    const gas = await ensureGasConfigOnFirstVisit();
-    if (!gas.url || !gas.token) {
-        showToast('Ingresa tu contraseña para continuar', 'error');
-    }
 
     if (backToTopBtn) {
         backToTopBtn.addEventListener('click', () => {
@@ -762,11 +780,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateClearFilterVisibility();
     }
     if (maxResultsInput) {
-        maxResultsInput.addEventListener('input', () => updateResultsMaxInfo(maxResultsInput.value || 10));
-        updateResultsMaxInfo(maxResultsInput.value || 10);
+        maxResultsInput.addEventListener('input', () => updateResultsMaxInfo(maxResultsInput.value || 5));
+        updateResultsMaxInfo(maxResultsInput.value || 5);
     }
     if (submitBtn) {
         submitBtn.addEventListener('click', () => searchMails());
+    }
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => refreshMails());
     }
     if (configLogoutBtn) {
         configLogoutBtn.addEventListener('click', () => {
@@ -782,6 +803,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) searchMails();
             }, 100);
         });
+    }
+
+    const gas = await ensureGasConfigOnFirstVisit();
+    if (!gas.url || !gas.token) {
+        showToast('Ingresa tu contraseña para continuar', 'error');
     }
 });
 
