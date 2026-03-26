@@ -101,11 +101,12 @@ async function loginWithPassword(password) {
     } catch (_) {
         throw new Error('No se pudo conectar al servidor');
     }
+    const raw = await res.text();
     let payload = {};
     try {
-        payload = await res.json();
+        payload = raw ? JSON.parse(raw) : {};
     } catch (_) {
-        throw new Error('Respuesta invalida del servidor');
+        throw new Error(`Backend no actualizado o URL incorrecta (HTTP ${res.status})`);
     }
     if (!res.ok || !payload || payload.ok !== true) {
         throw new Error((payload && payload.error) ? payload.error : 'Contrasena invalida');
