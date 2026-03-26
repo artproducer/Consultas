@@ -81,17 +81,23 @@
     <div id="configLoginModal" class="config-modal" aria-hidden="true">
         <div class="config-modal-card">
             <h3>Inicio de sesión</h3>
-            <p>Ingresa tu contraseña para acceder.</p>
+            <p>Conecta tu servicio para consultar el inbox.</p>
             <form id="configLoginForm">
                 <div class="field">
-                    <label for="configPasswordInput">Contraseña</label>
-                    <input type="password" id="configPasswordInput" placeholder="Ingresa tu contraseña" required>
+                    <label for="configUrlInput">URL Apps Script</label>
+                    <input type="url" id="configUrlInput" placeholder="https://script.google.com/macros/s/.../exec" required>
+                </div>
+                <div class="field">
+                    <label for="configTokenInput">Token secreto</label>
+                    <input type="password" id="configTokenInput" placeholder="Ingresa tu token" required>
                 </div>
                 <button type="submit" class="btn-submit config-login-btn">Entrar</button>
             </form>
         </div>
     </div>
 
+    <!-- Optional private config (create app-config.js locally, do not commit) -->
+    <script src="app-config.js"></script>
     <!-- Local Logic -->
     <script src="script.js" defer></script>
 </body>

@@ -1,5 +1,5 @@
 ﻿/**
- * Consulta Inbox - Netlify Functions + sesion por contrasena
+ * Consulta Inbox - Netlify Functions + sesi?n por contrase?a
  */
 const NETLIFY_API_BASE = 'https://marvelous-salmiakki-382f32.netlify.app';
 const HOST = window.location.hostname;
@@ -11,8 +11,14 @@ const LOGIN_ENDPOINT = `${API_BASE}/.netlify/functions/login`;
 const INBOX_ENDPOINT = `${API_BASE}/.netlify/functions/inbox`;
 const LOGOUT_ENDPOINT = `${API_BASE}/.netlify/functions/logout`;
 const POLL_INTERVAL_MS = 700;
+const POLL_INTERVAL_IDLE_MAX_MS = 3200;
+const POLL_INTERVAL_HIDDEN_MS = 700;
+const POLL_ERROR_BACKOFF_MAX_MS = 15000;
 let isSearching = false;
 let pollingInterval = null;
+let pollDelayMs = POLL_INTERVAL_MS;
+let pollIdleStreak = 0;
+let pollErrorStreak = 0;
 let renderedMessageIds = new Set();
 let latestSeenInternalDate = 0;
 let activeSearchSeq = 0;
@@ -30,7 +36,7 @@ let configPasswordInput;
 let configLoginPromise = null;
 async function hasActiveSession() {
     try {
-        const res = await fetch(`${INBOX_ENDPOINT}?action=ping`, {
+        const res = await fetch(${INBOX_ENDPOINT}?action=ping, {
             credentials: 'include'
         });
         if (!res.ok) return false;
@@ -65,7 +71,7 @@ function openLoginModal() {
             const submit = configLoginForm.querySelector('button[type="submit"]');
             const originalText = submit ? submit.textContent : '';
             if (!password) {
-                showToast('Ingresa la contrasena', 'error');
+                showToast('Ingresa la contrase?a', 'error');
                 return;
             }
             try {
@@ -75,7 +81,7 @@ function openLoginModal() {
                 }
                 await loginWithPassword(password);
             } catch (err) {
-                showToast(err.message || 'No se pudo iniciar sesion', 'error');
+                showToast(err.message || 'No se pudo iniciar sesi?n', 'error');
                 return;
             } finally {
                 if (submit) {
@@ -109,12 +115,57 @@ async function loginWithPassword(password) {
     try {
         payload = raw ? JSON.parse(raw) : {};
     } catch (_) {
+<<<<<<< ours
         throw new Error(`Backend no actualizado o URL incorrecta (HTTP ${res.status})`);
+=======
+        throw new Error('Respuesta inv?lida del servidor');
+>>>>>>> theirs
     }
     if (!res.ok || !payload || payload.ok !== true) {
-        throw new Error((payload && payload.error) ? payload.error : 'Contrasena invalida');
+        throw new Error((payload && payload.error) ? payload.error : 'Contrase?a inv?lida');
     }
 }
+
+function clearPollingLoop() {
+    if (pollingInterval) {
+        clearTimeout(pollingInterval);
+        pollingInterval = null;
+    }
+}
+
+function resetPollingCadence() {
+    pollDelayMs = POLL_INTERVAL_MS;
+    pollIdleStreak = 0;
+    pollErrorStreak = 0;
+}
+
+function markPollingSuccess(newItemsCount) {
+    pollErrorStreak = 0;
+    if (newItemsCount > 0) {
+        pollIdleStreak = 0;
+        pollDelayMs = POLL_INTERVAL_MS;
+        return;
+    }
+    pollIdleStreak = Math.min(pollIdleStreak + 1, 8);
+    pollDelayMs = Math.min(POLL_INTERVAL_IDLE_MAX_MS, POLL_INTERVAL_MS + (pollIdleStreak * 320));
+}
+
+function markPollingError(authIssue = false) {
+    pollIdleStreak = 0;
+    if (authIssue) {
+        pollDelayMs = Math.max(pollDelayMs, 10000);
+        return;
+    }
+    pollErrorStreak = Math.min(pollErrorStreak + 1, 6);
+    const nextDelay = POLL_INTERVAL_MS * Math.pow(2, pollErrorStreak);
+    pollDelayMs = Math.min(POLL_ERROR_BACKOFF_MAX_MS, nextDelay);
+}
+
+function getEffectivePollDelay() {
+    if (document.hidden) return Math.max(POLL_INTERVAL_HIDDEN_MS, pollDelayMs);
+    return pollDelayMs;
+}
+
 async function resetGasSession() {
     try {
         await fetch(LOGOUT_ENDPOINT, {
@@ -128,10 +179,11 @@ async function resetGasSession() {
     renderedMessageIds.clear();
     latestSeenInternalDate = 0;
     resultsContainer.innerHTML = '';
-    if (pollingInterval) clearInterval(pollingInterval);
+    clearPollingLoop();
+    resetPollingCadence();
     const live = document.getElementById('liveStatus');
     if (live) live.style.display = 'none';
-    showToast('Sesion cerrada', 'success');
+    showToast('Sesi?n cerrada', 'success');
     await ensureSessionOnFirstVisit();
 }
 function encodeB64Url(text) {
@@ -170,8 +222,10 @@ async function searchMails(isSilent = false) {
     const filter = isSilent ? activeFilterTerm : filterInput.value.trim();
     if (!filter) return;
     const localSeq = isSilent ? activeSearchSeq : (++activeSearchSeq);
+    let newItemsCount = 0;
     if (!isSilent) {
-        if (pollingInterval) clearInterval(pollingInterval);
+        clearPollingLoop();
+        resetPollingCadence();
         setLoading(true);
         activeFilterTerm = filter;
         resultsContainer.innerHTML = '';
@@ -194,13 +248,14 @@ async function searchMails(isSilent = false) {
             filter: filter,
             max: String(maxLimit)
         });
-        const res = await fetch(`${INBOX_ENDPOINT}?${qs.toString()}`, {
+        const res = await fetch(${INBOX_ENDPOINT}?, {
             credentials: 'include'
         });
         if (localSeq !== activeSearchSeq || filter !== activeFilterTerm) return;
         if (res.status === 401) {
+            if (isSilent) markPollingError(true);
             if (!isSilent) {
-                showToast('Sesion vencida. Inicia sesion de nuevo.', 'error');
+                showToast('Sesi?n vencida. Inicia sesi?n de nuevo.', 'error');
                 await ensureSessionOnFirstVisit();
             }
             return;
@@ -210,16 +265,18 @@ async function searchMails(isSilent = false) {
         if (!payload.ok) throw new Error(payload.error || 'Error en servidor');
         const items = Array.isArray(payload.items) ? payload.items : [];
         if (items.length === 0) {
+            if (isSilent) markPollingSuccess(0);
             if (!isSilent) {
-                resultsContainer.innerHTML = `
+                resultsContainer.innerHTML = 
                     <div style="text-align:center; padding:40px; border-radius:18px; border:1px dashed var(--border);">
                         <div style="font-size:0.9rem; font-weight:600; color:var(--text); margin-bottom:8px;">No se encontraron resultados</div>
                     </div>
-                `;
+                ;
             }
             return;
         }
         const newBatch = items.filter(m => !renderedMessageIds.has(m.id)).reverse();
+        newItemsCount = newBatch.length;
         for (let i = 0; i < newBatch.length; i++) {
             if (localSeq !== activeSearchSeq || filter !== activeFilterTerm) return;
             const msg = mapGasItemToMessage(newBatch[i]);
@@ -229,7 +286,9 @@ async function searchMails(isSilent = false) {
             renderedMessageIds.add(newBatch[i].id);
             renderEmail(msg, true, i, shouldHighlightNew);
         }
+        if (isSilent) markPollingSuccess(newItemsCount);
     } catch (err) {
+        if (isSilent) markPollingError(false);
         if (!isSilent) showToast(err.message || 'Error', 'error');
     } finally {
         if (!isSilent) setLoading(false);
@@ -238,14 +297,16 @@ async function searchMails(isSilent = false) {
     }
 }
 function startPolling() {
-    if (pollingInterval) clearInterval(pollingInterval);
+    clearPollingLoop();
     const live = document.getElementById('liveStatus');
     if (live) live.style.display = 'inline-flex';
-    pollingInterval = setInterval(() => {
+    const tick = async () => {
         const filter = activeFilterTerm.trim();
         if (!filter) return;
-        if (!isSearching) searchMails(true);
-    }, POLL_INTERVAL_MS);
+        if (!isSearching) await searchMails(true);
+        pollingInterval = setTimeout(tick, getEffectivePollDelay());
+    };
+    pollingInterval = setTimeout(tick, getEffectivePollDelay());
 }
 
 function renderEmail(msg, prepend = false, _animIndex = 0, highlightAsNew = false) {
@@ -508,7 +569,7 @@ function renderEmail(msg, prepend = false, _animIndex = 0, highlightAsNew = fals
 
 function renderHtmlInIframe(iframe, html) {
     if (!iframe || !iframe.contentWindow) return;
-    const raw = String(html || '');
+    const raw = String(html || '').replace(/<base\b[^>]*>/gi, '');
     const hasHtmlShell = /<html[\s>]/i.test(raw) || /<body[\s>]/i.test(raw);
     const docHtml = hasHtmlShell
         ? raw
@@ -518,6 +579,33 @@ function renderHtmlInIframe(iframe, html) {
     iframeDoc.open();
     iframeDoc.write(docHtml);
     iframeDoc.close();
+
+    try {
+        const d = iframe.contentWindow.document;
+        d.querySelectorAll('base').forEach(el => el.remove());
+        d.querySelectorAll('a[href]').forEach(a => {
+            a.setAttribute('target', '_blank');
+            const prevRel = (a.getAttribute('rel') || '').trim();
+            const relSet = new Set(prevRel ? prevRel.split(/\s+/) : []);
+            relSet.add('noopener');
+            relSet.add('noreferrer');
+            a.setAttribute('rel', Array.from(relSet).join(' '));
+        });
+
+        d.addEventListener('click', (ev) => {
+            const tgt = ev.target;
+            const anchor = tgt && typeof tgt.closest === 'function' ? tgt.closest('a[href]') : null;
+            if (!anchor) return;
+            const href = (anchor.getAttribute('href') || '').trim();
+            if (!href || href.startsWith('#') || /^javascript:/i.test(href)) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            const outUrl = anchor.href || href;
+            window.open(outUrl, '_blank', 'noopener,noreferrer');
+        }, true);
+    } catch (_) {
+        // no-op
+    }
 
     const resize = () => {
         try {
@@ -699,6 +787,11 @@ window.pasteFromClipboard = function () {
 window.clearFilterInput = function () {
     filterInput.value = '';
     filterInput.focus();
+    activeFilterTerm = '';
+    clearPollingLoop();
+    resetPollingCadence();
+    const live = document.getElementById('liveStatus');
+    if (live) live.style.display = 'none';
     updateClearFilterVisibility();
 };
 
@@ -722,7 +815,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const maxResultsInput = document.getElementById('maxResultsInput');
     const sessionOk = await ensureSessionOnFirstVisit();
     if (!sessionOk) {
-        showToast('Inicia sesion para buscar correos', 'error');
+        showToast('Inicia sesi?n para buscar correos', 'error');
     }
     if (backToTopBtn) {
         backToTopBtn.addEventListener('click', () => {
@@ -732,7 +825,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.addEventListener('scroll', updateBackToTopVisibility, { passive: true });
     updateBackToTopVisibility();
     if (filterInput && clearFilterBtn) {
-        filterInput.addEventListener('input', updateClearFilterVisibility);
+        filterInput.addEventListener('input', () => {
+            updateClearFilterVisibility();
+            const typedFilter = filterInput.value.trim();
+            if (activeFilterTerm && typedFilter !== activeFilterTerm) {
+                activeFilterTerm = '';
+                clearPollingLoop();
+                resetPollingCadence();
+                const live = document.getElementById('liveStatus');
+                if (live) live.style.display = 'none';
+            }
+        });
         updateClearFilterVisibility();
     }
     if (maxResultsInput) {
@@ -756,4 +859,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             }, 100);
         });
     }
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) return;
+        if (!activeFilterTerm.trim()) return;
+        resetPollingCadence();
+        clearPollingLoop();
+        startPolling();
+    });
 });
